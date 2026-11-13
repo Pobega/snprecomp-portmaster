@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -11,6 +12,13 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#ifdef __linux__
+#include <fcntl.h>
+#include <linux/input.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
 
 #include <SDL2/SDL.h>
 
@@ -144,7 +152,118 @@ PhysicalPadState s_cached_pad_state{};
 bool s_select_held = false;
 bool s_select_combo_used = false;
 bool s_prev_select = false;
+bool s_guide_held = false;
+bool s_guide_combo_used = false;
 bool s_prev_guide = false;
+
+#ifdef __linux__
+constexpr int EVDEV_MAX_DEVICES = 16;
+constexpr int EVDEV_POLL_INTERVAL_MS = 50;
+constexpr int EVDEV_EXIT_GRACE_MS = 400;
+constexpr int ANBERNIC_EVKEY_SELECT = 0x136;
+constexpr int ANBERNIC_EVKEY_START = 0x137;
+constexpr int ANBERNIC_EVKEY_MENU = 0x138;
+constexpr int STANDARD_EVKEY_MENU = 139;
+constexpr int STANDARD_EVKEY_START = 0x13b;
+constexpr int STANDARD_EVKEY_MODE = 0x13c;
+
+struct EvdevWatchDevice {
+    int fd = -1;
+    bool is_anbernic = false;
+};
+
+std::atomic<bool> s_evdev_watchdog_started{false};
+std::atomic<bool> s_evdev_watchdog_stop{false};
+
+bool is_evdev_bit_set(const uint8_t* bitmask, int bit) {
+    return (bitmask[bit / 8] & (1u << (bit % 8))) != 0;
+}
+
+void start_evdev_hotkey_watchdog() {
+    bool expected = false;
+    if (!s_evdev_watchdog_started.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    s_evdev_watchdog_stop.store(false, std::memory_order_relaxed);
+
+    // Poll kernel evdev state directly so Menu+Start works even when LD_PRELOAD
+    // shims swallow SDL_CONTROLLER_BUTTON_GUIDE or when the main/GL thread hangs.
+    std::thread([] {
+        std::vector<EvdevWatchDevice> devices;
+        for (int i = 0; i < EVDEV_MAX_DEVICES; ++i) {
+            char path[32]{};
+            std::snprintf(path, sizeof(path), "/dev/input/event%d", i);
+            int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            if (fd < 0) {
+                continue;
+            }
+
+            char name[128]{};
+            if (ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name) >= 0 &&
+                std::strstr(name, "ANBERNIC-keys") != nullptr) {
+                devices.push_back({ fd, true });
+                continue;
+            }
+
+            uint8_t cap_bits[(KEY_MAX + 7) / 8]{};
+            if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(cap_bits)), cap_bits) >= 0 &&
+                is_evdev_bit_set(cap_bits, STANDARD_EVKEY_START) &&
+                (is_evdev_bit_set(cap_bits, STANDARD_EVKEY_MODE) ||
+                 is_evdev_bit_set(cap_bits, STANDARD_EVKEY_MENU))) {
+                devices.push_back({ fd, false });
+                continue;
+            }
+
+            close(fd);
+        }
+
+        if (devices.empty()) {
+            return;
+        }
+
+        while (!s_evdev_watchdog_stop.load(std::memory_order_relaxed)) {
+            for (const auto& dev : devices) {
+                uint8_t key_bits[(KEY_MAX + 7) / 8]{};
+                if (ioctl(dev.fd, EVIOCGKEY(sizeof(key_bits)), key_bits) < 0) {
+                    continue;
+                }
+
+                bool exit_combo = false;
+                if (dev.is_anbernic) {
+                    bool start_down = is_evdev_bit_set(key_bits, ANBERNIC_EVKEY_START);
+                    bool menu_down = is_evdev_bit_set(key_bits, ANBERNIC_EVKEY_MENU) ||
+                                     is_evdev_bit_set(key_bits, STANDARD_EVKEY_MODE);
+                    bool select_down = is_evdev_bit_set(key_bits, ANBERNIC_EVKEY_SELECT);
+                    exit_combo = start_down && (menu_down || select_down);
+                } else {
+                    bool start_down = is_evdev_bit_set(key_bits, STANDARD_EVKEY_START);
+                    bool menu_down = is_evdev_bit_set(key_bits, STANDARD_EVKEY_MODE) ||
+                                     is_evdev_bit_set(key_bits, STANDARD_EVKEY_MENU);
+                    exit_combo = start_down && menu_down;
+                }
+
+                if (exit_combo) {
+                    std::fprintf(stderr, "[INPUT] Hardware exit hotkey detected via evdev — quitting.\n");
+                    std::fflush(stderr);
+                    ultramodern::quit();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(EVDEV_EXIT_GRACE_MS));
+                    for (const auto& d : devices) {
+                        close(d.fd);
+                    }
+                    std::fflush(stdout);
+                    std::fflush(stderr);
+                    std::_Exit(EXIT_SUCCESS);
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(EVDEV_POLL_INTERVAL_MS));
+        }
+
+        for (const auto& dev : devices) {
+            close(dev.fd);
+        }
+    }).detach();
+}
+#endif
 
 bool s_prev_nav_up = false;
 bool s_prev_nav_down = false;
@@ -403,9 +522,15 @@ void init_input() {
 
     log_detected_joysticks();
     open_primary_controller();
+#ifdef __linux__
+    start_evdev_hotkey_watchdog();
+#endif
 }
 
 void shutdown_input() {
+#ifdef __linux__
+    s_evdev_watchdog_stop.store(true, std::memory_order_relaxed);
+#endif
     std::lock_guard<std::mutex> lock(s_input_mutex);
     if (s_controller != nullptr) {
         SDL_GameControllerClose(s_controller);
@@ -475,15 +600,16 @@ void poll_input() {
     PhysicalPadState pad = read_physical_pad_state();
     s_cached_pad_state = pad;
 
-    // Check Select + Start held together
-    if (pad.select && pad.start) {
+    // Exit immediately when Menu+Start or Select+Start are held together
+    if ((pad.select && pad.start) || (pad.menu_guide && pad.start)) {
         s_select_combo_used = true;
+        s_guide_combo_used = true;
         save_config();
         ultramodern::quit();
         return;
     }
 
-    // Select alone edge trigger
+    // Select alone tap trigger
     if (pad.select && !s_prev_select) {
         s_select_held = true;
         s_select_combo_used = false;
@@ -495,9 +621,15 @@ void poll_input() {
     }
     s_prev_select = pad.select;
 
-    // Menu/Guide / F1 / Tab edge trigger
+    // Menu/Guide / F1 / Tab alone tap trigger
     if (pad.menu_guide && !s_prev_guide) {
-        toggle_overlay();
+        s_guide_held = true;
+        s_guide_combo_used = false;
+    } else if (!pad.menu_guide && s_prev_guide) {
+        if (s_guide_held && !s_guide_combo_used) {
+            toggle_overlay();
+        }
+        s_guide_held = false;
     }
     s_prev_guide = pad.menu_guide;
 

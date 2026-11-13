@@ -233,11 +233,13 @@ extern std::atomic_bool exited;
 namespace {
 
 void start_quit_watchdog() {
+    static constexpr int QUIT_WATCHDOG_POLL_MS = 50;
+    static constexpr int QUIT_WATCHDOG_GRACE_MS = 500;
     std::thread([] {
         while (!exited.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(QUIT_WATCHDOG_POLL_MS));
         }
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(QUIT_WATCHDOG_GRACE_MS));
         fflush(stdout);
         fflush(stderr);
         std::_Exit(EXIT_SUCCESS);
