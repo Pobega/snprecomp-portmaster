@@ -28,7 +28,6 @@ struct TileDescriptor {
     uint16_t tl = 0;
     uint16_t sh = 0;
     uint16_t th = 0;
-    bool loaded_via_tile = false;
 };
 
 struct TextureImageState {
@@ -78,6 +77,8 @@ public:
     const TileDescriptor& get_tile(uint32_t tile_idx) const { return tiles_[tile_idx & 7]; }
     const TextureImageState& get_timg() const { return timg_; }
     const uint8_t* get_tmem() const { return tmem_; }
+    void decode_pixel(const TileDescriptor& tile, uint32_t x, uint32_t y, uint32_t textlut,
+                      uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& a) const;
 
     TextureCacheStats get_and_reset_stats();
     size_t recycled_pool_size() const { return recycled_textures_.size(); }
@@ -100,8 +101,6 @@ private:
     };
 
     uint64_t compute_hash(const TileDescriptor& tile, uint32_t width, uint32_t height, uint32_t textfilt, uint32_t textlut) const;
-    void decode_pixel(const TileDescriptor& tile, uint32_t x, uint32_t y, uint32_t textlut,
-                      uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& a) const;
 
     uint8_t tmem_[TMEM_SIZE];
     TileDescriptor tiles_[NUM_TILES];

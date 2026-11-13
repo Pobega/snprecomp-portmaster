@@ -122,9 +122,6 @@ void TmemTextureCache::load_block(uint32_t tile_idx, uint32_t uls, uint32_t ult,
     for (auto& g : tile_generation_) {
         g++;
     }
-    for (auto& t : tiles_) {
-        t.loaded_via_tile = false;
-    }
     TileDescriptor& tile = tiles_[tile_idx & 7];
     uint32_t num_texels = lrs + 1;
     uint32_t bytes_per_texel = get_bytes_per_texel_numerator(tile.siz);
@@ -132,22 +129,15 @@ void TmemTextureCache::load_block(uint32_t tile_idx, uint32_t uls, uint32_t ult,
     uint32_t num_words = (total_bytes + 7) / 8;
     num_words = std::min(num_words, 512u - (tile.tmem & 0x1FFu));
 
-    uint32_t words_per_line = (dxt > 0) ? ((1u << 11) / dxt) : 0;
-
+    uint32_t dxt_acc = 0;
     for (uint32_t i = 0; i < num_words; ++i) {
-        uint32_t tmem_word = tile.tmem + i;
-        if (words_per_line >= 2) {
-            uint32_t line = (i * dxt) >> 11;
-            uint32_t word_in_line = i % words_per_line;
-            if (line & 1) {
-                word_in_line ^= 1;
-            }
-            tmem_word = tile.tmem + line * words_per_line + word_in_line;
-        }
-        tmem_word &= 0x1FFu;
+        uint32_t tmem_word = (tile.tmem + i) & 0x1FFu;
+        bool odd_line = (dxt > 0) && (((dxt_acc >> 11) & 1u) != 0);
+        dxt_acc += dxt;
         uint32_t rdram_phys = timg_.phys_addr + i * 8;
         for (uint32_t b = 0; b < 8; ++b) {
-            tmem_[tmem_word * 8 + b] = read_rdram_u8(rdram, rdram_phys + b);
+            uint32_t dest_byte = ((tmem_word * 8u + b) & 0xFFFu) ^ (odd_line ? 4u : 0u);
+            tmem_[dest_byte] = read_rdram_u8(rdram, rdram_phys + b);
         }
     }
 }
@@ -156,9 +146,6 @@ void TmemTextureCache::load_tile(uint32_t tile_idx, uint32_t uls, uint32_t ult, 
     tmem_generation_++;
     for (auto& g : tile_generation_) {
         g++;
-    }
-    for (auto& t : tiles_) {
-        t.loaded_via_tile = true;
     }
     TileDescriptor& tile = tiles_[tile_idx & 7];
     uint32_t ul_x = uls / 4;
@@ -174,19 +161,18 @@ void TmemTextureCache::load_tile(uint32_t tile_idx, uint32_t uls, uint32_t ult, 
 
     for (uint32_t y = 0; y < height; ++y) {
         uint32_t tmem_row_start = tile.tmem + y * tile.line;
+        bool odd_line = (y & 1u) != 0;
         if (tile.siz == G_IM_SIZ_4b && (ul_x & 1u) != 0) {
             uint32_t row_byte_offset = ((ul_y + y) * timg_.width + ul_x) / 2u;
             for (uint32_t x = 0; x < words_per_row; ++x) {
-                uint32_t word_in_row = x;
-                if (words_per_row >= 2 && (y & 1)) {
-                    word_in_row ^= 1;
-                }
-                uint32_t tmem_word = (tmem_row_start + word_in_row) & 0x1FFu;
+                uint32_t tmem_word = (tmem_row_start + x) & 0x1FFu;
                 uint32_t src_phys = timg_.phys_addr + row_byte_offset + x * 8;
                 for (uint32_t b = 0; b < 8; ++b) {
                     uint8_t hi = read_rdram_u8(rdram, src_phys + b);
                     uint8_t lo = read_rdram_u8(rdram, src_phys + b + 1);
-                    tmem_[tmem_word * 8 + b] = static_cast<uint8_t>(((hi & 0x0Fu) << 4) | ((lo >> 4) & 0x0Fu));
+                    uint8_t byte_val = static_cast<uint8_t>(((hi & 0x0Fu) << 4) | ((lo >> 4) & 0x0Fu));
+                    uint32_t dest_byte = ((tmem_word * 8u + b) & 0xFFFu) ^ (odd_line ? 4u : 0u);
+                    tmem_[dest_byte] = byte_val;
                 }
             }
             continue;
@@ -195,14 +181,11 @@ void TmemTextureCache::load_tile(uint32_t tile_idx, uint32_t uls, uint32_t ult, 
             ? (((ul_y + y) * timg_.width + ul_x) / 2u)
             : (((ul_y + y) * timg_.width + ul_x) * bytes_per_texel);
         for (uint32_t x = 0; x < words_per_row; ++x) {
-            uint32_t word_in_row = x;
-            if (words_per_row >= 2 && (y & 1)) {
-                word_in_row ^= 1;
-            }
-            uint32_t tmem_word = (tmem_row_start + word_in_row) & 0x1FFu;
+            uint32_t tmem_word = (tmem_row_start + x) & 0x1FFu;
             uint32_t src_phys = timg_.phys_addr + row_byte_offset + x * 8;
             for (uint32_t b = 0; b < 8; ++b) {
-                tmem_[tmem_word * 8 + b] = read_rdram_u8(rdram, src_phys + b);
+                uint32_t dest_byte = ((tmem_word * 8u + b) & 0xFFFu) ^ (odd_line ? 4u : 0u);
+                tmem_[dest_byte] = read_rdram_u8(rdram, src_phys + b);
             }
         }
     }
@@ -229,8 +212,8 @@ uint64_t TmemTextureCache::compute_hash(const TileDescriptor& tile, uint32_t wid
     uint64_t hash = FNV1A_OFFSET_BASIS;
     hash = fnv1a_step(hash, tile.fmt);
     hash = fnv1a_step(hash, tile.siz);
-    hash = fnv1a_step(hash, static_cast<uint8_t>(tile.line & 0xFF));
-    hash = fnv1a_step(hash, static_cast<uint8_t>(tile.tmem & 0xFF));
+    hash = fnv1a_bytes(hash, &tile.line, sizeof(tile.line));
+    hash = fnv1a_bytes(hash, &tile.tmem, sizeof(tile.tmem));
     hash = fnv1a_step(hash, tile.palette);
     hash = fnv1a_step(hash, tile.clamp_s ? 1 : 0);
     hash = fnv1a_step(hash, tile.mirror_s ? 1 : 0);
@@ -246,7 +229,8 @@ uint64_t TmemTextureCache::compute_hash(const TileDescriptor& tile, uint32_t wid
     hash = fnv1a_bytes(hash, &textlut, sizeof(textlut));
 
     size_t start_byte = (tile.tmem * 8) % TMEM_SIZE;
-    size_t byte_count = std::min(static_cast<size_t>(tile.line * height * 8), TMEM_SIZE - start_byte);
+    size_t line_stride_words = (tile.line > 0) ? tile.line : ((width * get_bytes_per_texel_numerator(tile.siz) + 7) / 8);
+    size_t byte_count = std::min(line_stride_words * height * 8, TMEM_SIZE - start_byte);
     if (byte_count == 0) {
         byte_count = std::min(static_cast<size_t>(width * height * 2), TMEM_SIZE - start_byte);
     }
@@ -272,16 +256,13 @@ void TmemTextureCache::decode_pixel(const TileDescriptor& tile, uint32_t x, uint
     }
 
     uint32_t width = (tile.sh >= tile.sl) ? (((tile.sh - tile.sl) / 4) + 1) : 32;
-    uint32_t words_per_row = tile.line;
     bool use_tlut = (tile.fmt == G_IM_FMT_CI) || (textlut != G_TT_NONE);
+    bool odd_row = (y & 1u) != 0;
 
     if (tile.siz == G_IM_SIZ_16b) {
-        uint32_t word_in_row = x / 4;
-        if (words_per_row >= 2 && (y & 1)) {
-            word_in_row ^= 1;
-        }
-        uint32_t tmem_word = (tile.tmem + y * tile.line + word_in_row) & 0x1FFu;
-        uint32_t byte_idx = tmem_word * 8 + (x % 4) * 2;
+        uint32_t line_stride_bytes = (tile.line > 0) ? (tile.line * 8u) : (width * 2u);
+        uint32_t row_byte = x * 2u;
+        uint32_t byte_idx = ((tile.tmem * 8u + y * line_stride_bytes + row_byte) & 0xFFFu) ^ (odd_row ? 4u : 0u);
         uint16_t val = (static_cast<uint16_t>(tmem_[byte_idx]) << 8) | tmem_[byte_idx + 1];
 
         if (tile.fmt == G_IM_FMT_RGBA) {
@@ -299,12 +280,10 @@ void TmemTextureCache::decode_pixel(const TileDescriptor& tile, uint32_t x, uint
             a = 255;
         }
     } else if (tile.siz == G_IM_SIZ_8b) {
-        uint32_t word_in_row = x / 8;
-        if (words_per_row >= 2 && (y & 1)) {
-            word_in_row ^= 1;
-        }
-        uint32_t tmem_word = (tile.tmem + y * tile.line + word_in_row) & 0x1FFu;
-        uint8_t val = tmem_[tmem_word * 8 + (x % 8)];
+        uint32_t line_stride_bytes = (tile.line > 0) ? (tile.line * 8u) : width;
+        uint32_t row_byte = x;
+        uint32_t byte_idx = ((tile.tmem * 8u + y * line_stride_bytes + row_byte) & 0xFFFu) ^ (odd_row ? 4u : 0u);
+        uint8_t val = tmem_[byte_idx];
 
         if (use_tlut) {
             uint32_t tlut_addr = 0x800u + static_cast<uint32_t>(val) * 8u;
@@ -329,16 +308,13 @@ void TmemTextureCache::decode_pixel(const TileDescriptor& tile, uint32_t x, uint
         }
     } else if (tile.siz == G_IM_SIZ_4b) {
         uint32_t byte_idx = 0;
-        if (words_per_row > 0 && (tile.loaded_via_tile || width >= 16u)) {
-            uint32_t word_in_row = x / 16u;
-            if (words_per_row >= 2 && (y & 1)) {
-                word_in_row ^= 1;
-            }
-            uint32_t tmem_word = (tile.tmem + y * words_per_row + word_in_row) & 0x1FFu;
-            byte_idx = tmem_word * 8u + ((x % 16u) / 2u);
+        if (tile.line > 0) {
+            uint32_t line_stride_bytes = tile.line * 8u;
+            uint32_t row_byte = x / 2u;
+            byte_idx = ((tile.tmem * 8u + y * line_stride_bytes + row_byte) & 0xFFFu) ^ (odd_row ? 4u : 0u);
         } else {
             uint32_t row_stride = (width + 1u) / 2u;
-            byte_idx = ((tile.tmem * 8u) + y * row_stride + (x / 2u)) % TMEM_SIZE;
+            byte_idx = (tile.tmem * 8u + y * row_stride + (x / 2u)) & 0xFFFu;
         }
         uint8_t byte_val = tmem_[byte_idx];
         uint8_t nibble = ((x & 1) == 0) ? ((byte_val >> 4) & 0x0F) : (byte_val & 0x0F);
@@ -366,13 +342,10 @@ void TmemTextureCache::decode_pixel(const TileDescriptor& tile, uint32_t x, uint
             a = 255;
         }
     } else if (tile.siz == G_IM_SIZ_32b) {
-        uint32_t word_in_row = x / 4;
-        if (words_per_row >= 2 && (y & 1)) {
-            word_in_row ^= 1;
-        }
-        uint32_t tmem_word = (tile.tmem + y * tile.line + word_in_row) & 0x1FFu;
-        uint32_t rg_idx = tmem_word * 8 + (x % 4) * 2;
-        uint32_t ba_idx = ((tmem_word + 256) & 0x1FFu) * 8 + (x % 4) * 2;
+        uint32_t line_stride_bytes = (tile.line > 0) ? (tile.line * 8u) : (width * 2u);
+        uint32_t row_byte = x * 2u;
+        uint32_t rg_idx = ((tile.tmem * 8u + y * line_stride_bytes + row_byte) & 0xFFFu) ^ (odd_row ? 4u : 0u);
+        uint32_t ba_idx = ((((tile.tmem + 256u) & 0x1FFu) * 8u + y * line_stride_bytes + row_byte) & 0xFFFu) ^ (odd_row ? 4u : 0u);
         r = tmem_[rg_idx];
         g = tmem_[rg_idx + 1];
         b = tmem_[ba_idx];

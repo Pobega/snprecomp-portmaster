@@ -496,6 +496,8 @@ void RspState::flush_batch() {
     Matrix4 proj = projection_matrix_;
     if (expand_aspect_ && widescreen_scale_ > 1.0f) {
         proj.m[0][0] /= widescreen_scale_;
+        proj.m[1][0] /= widescreen_scale_;
+        proj.m[2][0] /= widescreen_scale_;
         proj.m[3][0] /= widescreen_scale_;
     }
 
@@ -788,6 +790,10 @@ void RspState::draw_tex_rect(uint32_t tile, uint32_t ulx, uint32_t uly, uint32_t
         offset_u = -(static_cast<float>(tile_desc.sl) / SUBPIXEL_SCALE) * inv_w;
         offset_v = -(static_cast<float>(tile_desc.tl) / SUBPIXEL_SCALE) * inv_h;
     } else {
+        if (expand_aspect_ && widescreen_scale_ > 1.0f && (lrx - ulx >= 319 * 4)) {
+            x0 = -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
+            x1 = N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
+        }
         norm_u_scale = 1.0f / N64_WIDTH;
         norm_v_scale = -1.0f / N64_HEIGHT;
         offset_v = 1.0f - feedback_v_offset;
@@ -871,6 +877,11 @@ void RspState::draw_fill_rect(uint32_t ulx, uint32_t uly, uint32_t lrx, uint32_t
     float shift_x = compute_rect_shift_x();
     x0 += shift_x;
     x1 += shift_x;
+
+    if (expand_aspect_ && widescreen_scale_ > 1.0f && rect_align_origin_ == G_EX_ORIGIN_NONE && ulx == 0 && lrx >= 319 * 4) {
+        x0 = -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
+        x1 = N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
+    }
 
     Matrix4 old_proj = projection_matrix_;
     Matrix4 old_mv = modelview_stack_[modelview_top_];

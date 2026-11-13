@@ -174,7 +174,8 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
     uint32_t flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
     const char* video_driver = SDL_GetCurrentVideoDriver();
-    if (!video_driver || std::strcmp(video_driver, "offscreen") != 0) {
+    const char* windowed_env = std::getenv("SNP_WINDOWED");
+    if (!windowed_env && (!video_driver || std::strcmp(video_driver, "offscreen") != 0)) {
         flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
     s_window = SDL_CreateWindow(PROGRAM_NAME.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 720, 480, flags);

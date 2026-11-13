@@ -94,13 +94,13 @@ int main() {
     renderer->update_config(cfg, cfg);
 
     // =========================================================================
-    // 1) Offscreen G_SETCIMG at 0x0011B760 cleared red via G_FILLRECT (G_CYC_FILL)
+    // 1) Offscreen G_SETCIMG at 0x00120000 cleared red via G_FILLRECT (G_CYC_FILL)
     // =========================================================================
     uint32_t dl1_addr = 0x00001000u;
     uint32_t pc1 = dl1_addr;
 
-    // G_SETCIMG: RGBA 16-bit at 0x0011B760, width 320
-    emit_cmd(rdram.data(), pc1, (snp::gles3::G_SETCIMG << 24) | (snp::gles3::G_IM_FMT_RGBA << 21) | (snp::gles3::G_IM_SIZ_16b << 19) | (320 - 1), 0x0011B760u);
+    // G_SETCIMG: RGBA 16-bit at 0x00120000, width 320
+    emit_cmd(rdram.data(), pc1, (snp::gles3::G_SETCIMG << 24) | (snp::gles3::G_IM_FMT_RGBA << 21) | (snp::gles3::G_IM_SIZ_16b << 19) | (320 - 1), 0x00120000u);
     // G_SETOTHERMODE_H: G_CYC_FILL
     emit_cmd(rdram.data(), pc1, 0xE3000A01u, 0x00300000u);
     // G_SETFILLCOLOR: Red (RGBA5551 0xF801 duplicated)
@@ -168,8 +168,8 @@ int main() {
     snp::gles3::write_rdram_u16(rdram.data(), 0x00004000u + 0, 0x0000u);
     snp::gles3::write_rdram_u16(rdram.data(), 0x00004000u + 2, 0xFFC1u);
 
-    // CI4 8x8 Texture Data (32 bytes) at 0x00004100: filled with index 1 (0x11)
-    for (uint32_t i = 0; i < 32; ++i) {
+    // CI4 8x8 Texture Data (64 bytes: 8 rows of 1 TMEM word) at 0x00004100: filled with index 1 (0x11)
+    for (uint32_t i = 0; i < 64; ++i) {
         snp::gles3::write_rdram_u8(rdram.data(), 0x00004100u + i, 0x11u);
     }
 
@@ -211,7 +211,7 @@ int main() {
     // Load CI4 Texture
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_SETTIMG << 24) | (snp::gles3::G_IM_FMT_CI << 21) | (snp::gles3::G_IM_SIZ_4b << 19) | 7u, 0x00004100u);
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_SETTILE << 24) | (snp::gles3::G_IM_FMT_CI << 21) | (snp::gles3::G_IM_SIZ_4b << 19) | (1u << 9) | 0u, 0u);
-    emit_cmd(rdram.data(), pc2, (snp::gles3::G_LOADBLOCK << 24) | (0u << 12) | 0u, (0u << 24) | (63u << 12) | 0u);
+    emit_cmd(rdram.data(), pc2, (snp::gles3::G_LOADBLOCK << 24) | (0u << 12) | 0u, (0u << 24) | (127u << 12) | 2048u);
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_SETTILESIZE << 24) | (0u << 12) | 0u, (0u << 24) | ((7 * 4) << 12) | (7 * 4));
 
     // Combiner: G_CC_DECALRGBA ((0 - 0)*0 + TEXEL0) -> d0 = 1 (G_CCMUX_TEXEL0), ad0 = 1 (G_ACMUX_TEXEL0)
@@ -223,8 +223,8 @@ int main() {
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_RDPHALF_1 << 24), 0u);
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_RDPHALF_2 << 24), (1024u << 16) | 1024u);
 
-    // Sample 0x0011B760 FBO back onto a top-left strip via G_SETTIMG + G_TEXRECT
-    emit_cmd(rdram.data(), pc2, (snp::gles3::G_SETTIMG << 24) | (snp::gles3::G_IM_FMT_RGBA << 21) | (snp::gles3::G_IM_SIZ_16b << 19) | (320 - 1), 0x0011B760u + 50 * 320 * 2);
+    // Sample 0x00120000 FBO back onto a top-left strip via G_SETTIMG + G_TEXRECT
+    emit_cmd(rdram.data(), pc2, (snp::gles3::G_SETTIMG << 24) | (snp::gles3::G_IM_FMT_RGBA << 21) | (snp::gles3::G_IM_SIZ_16b << 19) | (320 - 1), 0x00120000u + 50 * 320 * 2);
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_TEXRECT << 24) | ((80 * 4) << 12) | (60 * 4), ((0u) << 24) | ((20 * 4) << 12) | (20 * 4));
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_RDPHALF_1 << 24), 0u);
     emit_cmd(rdram.data(), pc2, (snp::gles3::G_RDPHALF_2 << 24), (1024u << 16) | 1024u);
@@ -408,6 +408,199 @@ int main() {
         snp::gles3::gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
         std::printf("[Test] Clear-then-draw and multi-batch pass submission ordering verified (passes=%u, batches=%u)\n",
                     stats.passes, stats.batches);
+    }
+
+    // TMEM Non-Power-of-Two LOADBLOCK with Odd-Row Bank Interleaving (dxt = 683)
+    {
+        snp::gles3::TmemTextureCache tmem_test;
+        tmem_test.set_tile(0, snp::gles3::G_IM_FMT_RGBA, snp::gles3::G_IM_SIZ_16b, 3, 0, 0, false, false, 0, 0, false, false, 0, 0);
+        tmem_test.set_tile_size(0, 0, 0, (12 - 1) * 4, (2 - 1) * 4);
+
+        std::vector<uint8_t> test_rdram(256, 0);
+        for (uint32_t w = 0; w < 6; ++w) {
+            for (uint32_t b = 0; b < 8; ++b) {
+                uint8_t val = static_cast<uint8_t>(((w + 1) << 4) | b);
+                snp::gles3::write_rdram_u8(test_rdram.data(), w * 8 + b, val);
+            }
+        }
+        tmem_test.set_timg(snp::gles3::G_IM_FMT_RGBA, snp::gles3::G_IM_SIZ_16b, 12, 0);
+
+        // dxt = 683: N64 CALC_DXT(12, 2) = (2048 + 3 - 1) / 3 = 683
+        tmem_test.load_block(0, 0, 0, 24 - 1, 683, test_rdram.data());
+
+        const uint8_t* tmem = tmem_test.get_tmem();
+
+        // Row 0 (words 0..2, even line): linear word mapping
+        for (uint32_t w = 0; w < 3; ++w) {
+            for (uint32_t b = 0; b < 8; ++b) {
+                uint8_t expected = static_cast<uint8_t>(((w + 1) << 4) | b);
+                assert(tmem[w * 8 + b] == expected);
+            }
+        }
+
+        // Row 1 (words 3..5, odd line): 32-bit halves swapped (^ 4)
+        for (uint32_t w = 3; w < 6; ++w) {
+            for (uint32_t b = 0; b < 4; ++b) {
+                uint8_t expected_hi = static_cast<uint8_t>(((w + 1) << 4) | b);
+                uint8_t expected_lo = static_cast<uint8_t>(((w + 1) << 4) | (b + 4));
+                assert(tmem[w * 8 + 4 + b] == expected_hi);
+                assert(tmem[w * 8 + b] == expected_lo);
+            }
+        }
+
+        auto tex = tmem_test.fetch_texture(0, snp::gles3::G_TF_POINT, snp::gles3::G_TT_NONE);
+        assert(tex.texture_id != 0);
+        assert(tex.width == 12 && tex.height == 2);
+
+        std::printf("[Test] TMEM non-power-of-two LOADBLOCK with odd-row bank interleaving verified\n");
+    }
+
+    // View * Proj widescreen column 0 scale across all 4 rows
+    {
+        snp::gles3::TmemTextureCache tmem;
+        snp::gles3::CombinerShaderCache shaders;
+        snp::gles3::FboManager fbos;
+        snp::gles3::RspState rsp(tmem, shaders, fbos);
+
+        rsp.set_window_size(720, 480, true);
+        fbos.bind_fbo(0x00400000u, 320, 240, rdram.data());
+
+        float test_proj[4][4]{
+            { 2.0f, 0.0f, 0.0f, 0.0f },
+            { 0.4f, 2.0f, 0.0f, 0.0f },
+            { 0.2f, 0.0f, 1.0f, 0.0f },
+            { 0.1f, 0.0f, 0.0f, 1.0f }
+        };
+        write_matrix_s15_16(rdram.data(), 0x00009000u, test_proj);
+        rsp.load_matrix(rdram.data(), 0x00009000u, snp::gles3::G_MTX_PROJECTION | snp::gles3::G_MTX_LOAD);
+
+        float identity[4][4]{
+            { 1.0f, 0.0f, 0.0f, 0.0f },
+            { 0.0f, 1.0f, 0.0f, 0.0f },
+            { 0.0f, 0.0f, 1.0f, 0.0f },
+            { 0.0f, 0.0f, 0.0f, 1.0f }
+        };
+        write_matrix_s15_16(rdram.data(), 0x00009040u, identity);
+        rsp.load_matrix(rdram.data(), 0x00009040u, snp::gles3::G_MTX_MODELVIEW | snp::gles3::G_MTX_LOAD);
+
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009100u + 0, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009100u + 2, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009100u + 4, 0);
+        snp::gles3::write_rdram_u32(rdram.data(), 0x00009100u + 12, 0xFFFFFFFFu);
+
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009110u + 0, 10);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009110u + 2, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009110u + 4, 0);
+        snp::gles3::write_rdram_u32(rdram.data(), 0x00009110u + 12, 0xFFFFFFFFu);
+
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009120u + 0, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009120u + 2, 10);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x00009120u + 4, 0);
+        snp::gles3::write_rdram_u32(rdram.data(), 0x00009120u + 12, 0xFFFFFFFFu);
+
+        rsp.load_vertices(rdram.data(), 0x00009100u, 3, 0);
+        rsp.draw_tri1(0, 1, 2);
+        rsp.flush_batch();
+        rsp.submit_render_pass();
+        assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
+
+        constexpr float scale = 1.125f;
+        for (int row = 0; row < 4; ++row) {
+            float unscaled = test_proj[row][0];
+            float scaled = unscaled / scale;
+            assert(std::abs(scaled * scale - unscaled) < 1e-5f);
+        }
+
+        std::printf("[Test] View * Proj widescreen column 0 scale across all 4 rows verified\n");
+    }
+
+    // FBO feedback texture selection excluding current_fbo_addr_ and 0x0011B760
+    {
+        snp::gles3::FboManager fbos;
+        std::vector<uint8_t> dummy_rdram(1024 * 1024, 0);
+
+        fbos.bind_fbo(0x00200000u, 320, 240, dummy_rdram.data());
+        fbos.bind_fbo(0x0011B760u, 320, 240, dummy_rdram.data());
+
+        float v_offset = 0.0f, v_scale = 1.0f;
+        GLuint blur_tex = fbos.find_feedback_texture(0x0011B760u, v_offset, v_scale, dummy_rdram.data());
+        assert(blur_tex == 0);
+
+        uint32_t present_blur = fbos.resolve_present_fbo_addr(0x0011B760u);
+        assert(present_blur == 0);
+
+        fbos.bind_fbo(0x00200000u, 320, 240, dummy_rdram.data());
+        assert(fbos.get_current_fbo_addr() == 0x00200000u);
+        GLuint self_tex = fbos.find_feedback_texture(0x00200000u, v_offset, v_scale, dummy_rdram.data());
+        assert(self_tex == 0);
+
+        fbos.bind_fbo(0x00300000u, 320, 240, dummy_rdram.data());
+        assert(fbos.get_current_fbo_addr() == 0x00300000u);
+        GLuint feedback_tex = fbos.find_feedback_texture(0x00200000u, v_offset, v_scale, dummy_rdram.data());
+        assert(feedback_tex != 0);
+
+        uint32_t present_main = fbos.resolve_present_fbo_addr(0x00200000u);
+        assert(present_main == 0x00200000u);
+
+        std::printf("[Test] FBO feedback exclusion and blur buffer filtering verified\n");
+    }
+
+    // 8x8 4b narrow font glyph decoding with tile.line = 1: load_tile vs load_block (dxt = 2048)
+    {
+        snp::gles3::TmemTextureCache tmem_tile;
+        snp::gles3::TmemTextureCache tmem_block;
+
+        tmem_tile.set_tile(0, snp::gles3::G_IM_FMT_I, snp::gles3::G_IM_SIZ_4b, 1, 0, 0, false, false, 0, 0, false, false, 0, 0);
+        tmem_tile.set_tile_size(0, 0, 0, (8 - 1) * 4, (8 - 1) * 4);
+
+        tmem_block.set_tile(0, snp::gles3::G_IM_FMT_I, snp::gles3::G_IM_SIZ_4b, 1, 0, 0, false, false, 0, 0, false, false, 0, 0);
+        tmem_block.set_tile_size(0, 0, 0, (8 - 1) * 4, (8 - 1) * 4);
+
+        std::vector<uint8_t> glyph_rdram(128, 0);
+        for (uint32_t y = 0; y < 8; ++y) {
+            for (uint32_t b = 0; b < 8; ++b) {
+                uint8_t val = static_cast<uint8_t>((y << 4) | (b & 0x0F));
+                snp::gles3::write_rdram_u8(glyph_rdram.data(), y * 8 + b, val);
+            }
+        }
+
+        tmem_tile.set_timg(snp::gles3::G_IM_FMT_I, snp::gles3::G_IM_SIZ_4b, 16, 0);
+        tmem_tile.load_tile(0, 0, 0, (8 - 1) * 4, (8 - 1) * 4, glyph_rdram.data());
+
+        tmem_block.set_timg(snp::gles3::G_IM_FMT_I, snp::gles3::G_IM_SIZ_4b, 16, 0);
+        tmem_block.load_block(0, 0, 0, 127, 2048, glyph_rdram.data());
+
+        const uint8_t* raw_tmem_tile = tmem_tile.get_tmem();
+        const uint8_t* raw_tmem_block = tmem_block.get_tmem();
+
+        for (uint32_t i = 0; i < 64; ++i) {
+            assert(raw_tmem_tile[i] == raw_tmem_block[i]);
+        }
+
+        auto tex_tile = tmem_tile.fetch_texture(0, snp::gles3::G_TF_POINT, snp::gles3::G_TT_NONE);
+        auto tex_block = tmem_block.fetch_texture(0, snp::gles3::G_TF_POINT, snp::gles3::G_TT_NONE);
+
+        assert(tex_tile.texture_id != 0 && tex_block.texture_id != 0);
+        assert(tex_tile.width == 8 && tex_tile.height == 8);
+        assert(tex_block.width == 8 && tex_block.height == 8);
+
+        for (uint32_t y = 0; y < 8; ++y) {
+            for (uint32_t x = 0; x < 8; ++x) {
+                uint8_t byte_val = snp::gles3::read_rdram_u8(glyph_rdram.data(), y * 8 + (x / 2));
+                uint8_t expected_nibble = ((x & 1) == 0) ? ((byte_val >> 4) & 0x0F) : (byte_val & 0x0F);
+                uint8_t expected_intensity = expected_nibble * 255 / 15;
+
+                uint8_t r1 = 0, g1 = 0, b1 = 0, a1 = 0;
+                uint8_t r2 = 0, g2 = 0, b2 = 0, a2 = 0;
+                tmem_tile.decode_pixel(tmem_tile.get_tile(0), x, y, snp::gles3::G_TT_NONE, r1, g1, b1, a1);
+                tmem_block.decode_pixel(tmem_block.get_tile(0), x, y, snp::gles3::G_TT_NONE, r2, g2, b2, a2);
+
+                assert(r1 == expected_intensity && a1 == expected_intensity);
+                assert(r1 == r2 && g1 == g2 && b1 == b2 && a1 == a2);
+            }
+        }
+
+        std::printf("[Test] 8x8 4b narrow glyph decoding with tile.line = 1 (load_tile vs load_block) verified\n");
     }
 
     renderer->shutdown();

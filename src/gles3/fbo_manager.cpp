@@ -12,6 +12,7 @@ namespace {
     constexpr uint32_t N64_SCREEN_WIDTH = 320;
     constexpr uint32_t N64_SCREEN_HEIGHT = 240;
     constexpr uint32_t N64_BUFFER_BYTES = N64_SCREEN_WIDTH * N64_SCREEN_HEIGHT * 2;
+    constexpr uint32_t BLUR_EFFECT_BUFFER_ADDR = 0x0011B760;
 }
 
 FboManager::FboManager() = default;
@@ -142,6 +143,7 @@ GLuint FboManager::find_feedback_texture(uint32_t timg_phys_addr, float& out_v_o
     for (const auto& pair : fbo_map_) {
         const FboEntry& entry = pair.second;
         if (!entry.rendered) continue;
+        if (entry.cimg_addr == current_fbo_addr_) continue;
 
         if (timg_phys_addr >= entry.cimg_addr && timg_phys_addr < entry.cimg_addr + N64_BUFFER_BYTES) {
             uint64_t current_checksum = compute_rdram_checksum(rdram, entry.cimg_addr, N64_BUFFER_BYTES);
@@ -160,9 +162,14 @@ GLuint FboManager::find_feedback_texture(uint32_t timg_phys_addr, float& out_v_o
 }
 
 uint32_t FboManager::resolve_present_fbo_addr(uint32_t vi_origin_phys) const {
+    if (vi_origin_phys == BLUR_EFFECT_BUFFER_ADDR) {
+        return 0;
+    }
+
     constexpr uint32_t MAX_VI_ROW_DRIFT = N64_SCREEN_WIDTH * 16 * 2;
     for (const auto& pair : fbo_map_) {
         uint32_t fbo_addr = pair.first;
+        if (fbo_addr == BLUR_EFFECT_BUFFER_ADDR) continue;
         if ((vi_origin_phys >= fbo_addr && vi_origin_phys <= fbo_addr + MAX_VI_ROW_DRIFT) ||
             (fbo_addr >= vi_origin_phys && fbo_addr <= vi_origin_phys + MAX_VI_ROW_DRIFT)) {
             return pair.second.cimg_addr;
@@ -170,22 +177,29 @@ uint32_t FboManager::resolve_present_fbo_addr(uint32_t vi_origin_phys) const {
     }
 
     auto it = fbo_map_.find(last_rendered_fbo_addr_);
-    if (it != fbo_map_.end()) {
+    if (it != fbo_map_.end() && it->first != BLUR_EFFECT_BUFFER_ADDR) {
         return it->second.cimg_addr;
     }
-    if (!fbo_map_.empty()) {
-        return fbo_map_.begin()->second.cimg_addr;
+    for (const auto& pair : fbo_map_) {
+        if (pair.first != BLUR_EFFECT_BUFFER_ADDR) {
+            return pair.second.cimg_addr;
+        }
     }
     return 0;
 }
 
 void FboManager::present_vi_origin(uint32_t vi_origin_phys, int win_w, int win_h, bool expand_aspect) {
+    if (vi_origin_phys == BLUR_EFFECT_BUFFER_ADDR) {
+        return;
+    }
+
     const FboEntry* entry = nullptr;
 
     // Search for matching FBO within a few row offsets of VI origin
     constexpr uint32_t MAX_VI_ROW_DRIFT = N64_SCREEN_WIDTH * 16 * 2;
     for (const auto& pair : fbo_map_) {
         uint32_t fbo_addr = pair.first;
+        if (fbo_addr == BLUR_EFFECT_BUFFER_ADDR) continue;
         if ((vi_origin_phys >= fbo_addr && vi_origin_phys <= fbo_addr + MAX_VI_ROW_DRIFT) ||
             (fbo_addr >= vi_origin_phys && fbo_addr <= vi_origin_phys + MAX_VI_ROW_DRIFT)) {
             entry = &pair.second;
@@ -195,10 +209,15 @@ void FboManager::present_vi_origin(uint32_t vi_origin_phys, int win_w, int win_h
 
     if (!entry) {
         auto it = fbo_map_.find(last_rendered_fbo_addr_);
-        if (it != fbo_map_.end()) {
+        if (it != fbo_map_.end() && it->first != BLUR_EFFECT_BUFFER_ADDR) {
             entry = &it->second;
-        } else if (!fbo_map_.empty()) {
-            entry = &fbo_map_.begin()->second;
+        } else {
+            for (const auto& pair : fbo_map_) {
+                if (pair.first != BLUR_EFFECT_BUFFER_ADDR) {
+                    entry = &pair.second;
+                    break;
+                }
+            }
         }
     }
 
