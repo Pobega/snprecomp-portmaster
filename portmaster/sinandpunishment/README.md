@@ -12,7 +12,16 @@ Press **Select** (alone) or **Menu/Guide** (or keyboard **Tab** / **F1**) at any
 ## Controls & Schemes
 The port automatically detects menus vs. combat. In menus, the D-Pad navigates, A confirms, and B cancels. In combat, six schemes are available:
 
-1. **RGSP: Bumper Strafe (`bumper_strafe`, Default)**:
+1. **Stickless: Strafe + Shift (`dpad_strafe_shift`, Default)**:
+   - **D-Pad Left / Right**: Strafe Left / Right.
+   - **Hold L1 or L2 + D-Pad**: Manual Aim (with X button Re-Center).
+   - **Default (no shift)**: Auto-Lock On; press **X** while moving to cycle targets.
+   - **A (East) / R1 / R2**: Fire / Sword slash.
+   - **B (South)**: Jump.
+   - **Y (West)**: 1-Button Dodge roll.
+   - **Start**: Pause.
+
+2. **Stickless: Bumper Strafe (`bumper_strafe`)**:
    - **D-Pad**: Reticle aiming with S-Curve micro-aiming.
    - **L1 / R1**: Strafe Left / Right.
    - **A (East) / Y (West) / R2**: Fire / Sword slash.
@@ -20,22 +29,13 @@ The port automatically detects menus vs. combat. In menus, the D-Pad navigates, 
    - **X (North) / L2**: Smart Lock-On (Hold to lock, release for manual aim).
    - **Start**: Pause.
 
-2. **RGSP: Face Strafe (`face_strafe`)**:
+3. **Stickless: Face Strafe (`face_strafe`)**:
    - **D-Pad**: Reticle aiming with S-Curve micro-aiming.
    - **Y (West) / B (South)**: Strafe Left / Right.
    - **A (East)**: 1-Button Dodge roll (directional).
    - **R1 / R2**: Fire / Sword slash.
    - **L1 / X (North)**: Jump / Double jump.
    - **L2**: Smart Lock-On.
-   - **Start**: Pause.
-
-3. **RGSP: Strafe + Shift (`dpad_strafe_shift`)**:
-   - **D-Pad Left / Right**: Strafe Left / Right.
-   - **Hold L1 or L2 + D-Pad**: Manual Aim (with X button Re-Center).
-   - **Default (no shift)**: Auto-Lock On; press **X** while moving to cycle targets.
-   - **A (East) / R1 / R2**: Fire / Sword slash.
-   - **B (South)**: Jump.
-   - **Y (West)**: 1-Button Dodge roll.
    - **Start**: Pause.
 
 4. **Legacy: D-Pad Aim (`dpad_aim`)**:
@@ -66,8 +66,8 @@ The port automatically detects menus vs. combat. In menus, the D-Pad navigates, 
 
 ## Aiming Assists & Smart Lock-On
 - **Smart Lock-On**:
-  - `hold` (Default): Holding the Lock-On button locks onto targets; releasing restores manual crosshair aiming.
-  - `auto`: Automatically acquires and tracks targets; holding Lock-On switches to manual aiming.
+  - `auto` (Default): Automatically acquires and tracks targets; holding Lock-On switches to manual aiming.
+  - `hold`: Holding the Lock-On button locks onto targets; releasing restores manual crosshair aiming.
   - `off`: Classic N64 toggle mode.
 - **Aim Curves**:
   - `s_curve` (Default): Frames 1-3 provide fine micro-step taps for picking off distant missiles, smoothly ramping into fast tracking via cubic Hermite curve.

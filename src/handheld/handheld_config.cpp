@@ -70,8 +70,9 @@ void save_config(const std::string& config_path) {
         << "music_volume = " << g_config.audio.music_volume << "\n"
         << "sfx_volume = " << g_config.audio.sfx_volume << "\n\n"
         << "[controls]\n"
-        << "# Scheme: \"bumper_strafe\" (RGSP default), \"face_strafe\", \"dpad_strafe_shift\", \"dpad_aim\", \"dpad_strafe\", or \"twin_stick\"\n"
+        << "# Scheme: \"dpad_strafe_shift\" (Stickless default), \"bumper_strafe\", \"face_strafe\", \"dpad_aim\", \"dpad_strafe\", or \"twin_stick\"\n"
         << "scheme = \"" << g_config.controls.scheme << "\"\n"
+        << "# Smart Lock-On: \"auto\" (Hold=Manual default), \"hold\" (Hold=Lock), or \"off\" (N64 toggle)\n"
         << "smart_lock_on = \"" << g_config.controls.smart_lock_on << "\"\n"
         << "aim_curve = \"" << g_config.controls.aim_curve << "\"\n"
         << "# Face layout: \"nintendo\" (East A, South B, North X, West Y) or \"positional\" (swapped A<->B, X<->Y)\n"
@@ -119,8 +120,8 @@ bool load_config(const std::string& config_path) {
         }
 
         if (auto controls = tbl["controls"].as_table()) {
-            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_BUMPER_STRAFE);
-            g_config.controls.smart_lock_on = controls->get("smart_lock_on")->value_or(SMART_LOCK_HOLD);
+            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_DPAD_STRAFE_SHIFT);
+            g_config.controls.smart_lock_on = controls->get("smart_lock_on")->value_or(SMART_LOCK_AUTO);
             g_config.controls.aim_curve = controls->get("aim_curve")->value_or(AIM_CURVE_S_CURVE);
             g_config.controls.face_layout = controls->get("face_layout")->value_or(FACE_LAYOUT_NINTENDO);
             g_config.controls.stick_sensitivity = static_cast<float>(controls->get("stick_sensitivity")->value_or(double(DEFAULT_STICK_SENSITIVITY)));
@@ -129,19 +130,19 @@ bool load_config(const std::string& config_path) {
             g_config.controls.rumble = controls->get("rumble")->value_or(true);
             g_config.controls.swap_sticks = controls->get("swap_sticks")->value_or(false);
 
-            if (g_config.controls.scheme != CONTROL_SCHEME_BUMPER_STRAFE &&
+            if (g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE_SHIFT &&
+                g_config.controls.scheme != CONTROL_SCHEME_BUMPER_STRAFE &&
                 g_config.controls.scheme != CONTROL_SCHEME_FACE_STRAFE &&
-                g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE_SHIFT &&
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_AIM &&
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE &&
                 g_config.controls.scheme != CONTROL_SCHEME_TWIN_STICK) {
-                g_config.controls.scheme = CONTROL_SCHEME_BUMPER_STRAFE;
+                g_config.controls.scheme = CONTROL_SCHEME_DPAD_STRAFE_SHIFT;
             }
 
-            if (g_config.controls.smart_lock_on != SMART_LOCK_HOLD &&
-                g_config.controls.smart_lock_on != SMART_LOCK_AUTO &&
+            if (g_config.controls.smart_lock_on != SMART_LOCK_AUTO &&
+                g_config.controls.smart_lock_on != SMART_LOCK_HOLD &&
                 g_config.controls.smart_lock_on != SMART_LOCK_OFF) {
-                g_config.controls.smart_lock_on = SMART_LOCK_HOLD;
+                g_config.controls.smart_lock_on = SMART_LOCK_AUTO;
             }
 
             if (g_config.controls.aim_curve != AIM_CURVE_S_CURVE &&

@@ -52,8 +52,8 @@ struct AudioSettings {
 };
 
 struct ControlsSettings {
-    std::string scheme = CONTROL_SCHEME_BUMPER_STRAFE;
-    std::string smart_lock_on = SMART_LOCK_HOLD;
+    std::string scheme = CONTROL_SCHEME_DPAD_STRAFE_SHIFT;
+    std::string smart_lock_on = SMART_LOCK_AUTO;
     std::string aim_curve = AIM_CURVE_S_CURVE;
     std::string face_layout = FACE_LAYOUT_NINTENDO;
     float stick_sensitivity = DEFAULT_STICK_SENSITIVITY;

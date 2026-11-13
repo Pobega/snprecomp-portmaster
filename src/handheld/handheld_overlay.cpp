@@ -328,16 +328,16 @@ std::string get_row_label(MenuRow row) {
 std::string get_row_value(MenuRow row, const HandheldConfig& cfg) {
     switch (row) {
     case MenuRow::ControlScheme:
-        if (cfg.controls.scheme == CONTROL_SCHEME_BUMPER_STRAFE) return "RGSP: Bumper Strafe";
-        if (cfg.controls.scheme == CONTROL_SCHEME_FACE_STRAFE) return "RGSP: Face Strafe";
-        if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) return "RGSP: Strafe + Shift";
+        if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) return "Stickless: Strafe + Shift";
+        if (cfg.controls.scheme == CONTROL_SCHEME_BUMPER_STRAFE) return "Stickless: Bumper Strafe";
+        if (cfg.controls.scheme == CONTROL_SCHEME_FACE_STRAFE) return "Stickless: Face Strafe";
         if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_AIM) return "Legacy: D-Pad Aim";
         if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE) return "Legacy: Face Aim";
         return "Twin Stick";
     case MenuRow::SmartLockOn:
-        if (cfg.controls.smart_lock_on == SMART_LOCK_AUTO) return "Auto (Hold=Manual)";
+        if (cfg.controls.smart_lock_on == SMART_LOCK_HOLD) return "Hold (Hold=Lock)";
         if (cfg.controls.smart_lock_on == SMART_LOCK_OFF) return "Off (N64 Toggle)";
-        return "Hold (Manual Default)";
+        return "Auto (Hold=Manual)";
     case MenuRow::AimCurve:
         if (cfg.controls.aim_curve == AIM_CURVE_LINEAR) return "Linear";
         return "S-Curve (Precision)";
@@ -369,9 +369,9 @@ void cycle_row_value(MenuRow row, bool forward) {
     switch (row) {
     case MenuRow::ControlScheme: {
         const std::array<std::string, 6> schemes = {
+            CONTROL_SCHEME_DPAD_STRAFE_SHIFT,
             CONTROL_SCHEME_BUMPER_STRAFE,
             CONTROL_SCHEME_FACE_STRAFE,
-            CONTROL_SCHEME_DPAD_STRAFE_SHIFT,
             CONTROL_SCHEME_DPAD_AIM,
             CONTROL_SCHEME_DPAD_STRAFE,
             CONTROL_SCHEME_TWIN_STICK,
@@ -384,8 +384,8 @@ void cycle_row_value(MenuRow row, bool forward) {
     }
     case MenuRow::SmartLockOn: {
         const std::array<std::string, 3> modes = {
-            SMART_LOCK_HOLD,
             SMART_LOCK_AUTO,
+            SMART_LOCK_HOLD,
             SMART_LOCK_OFF,
         };
         auto it = std::find(modes.begin(), modes.end(), cfg.controls.smart_lock_on);
