@@ -5,15 +5,26 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <atomic>
 
 namespace snp::gles3 {
 
 namespace {
 OverlayRenderCallback s_overlay_render_callback = nullptr;
+OverlayActiveCallback s_overlay_active_callback = nullptr;
+std::atomic<int> s_target_swap_interval{ 1 };
 } // namespace
 
 void set_overlay_render_callback(OverlayRenderCallback callback) {
     s_overlay_render_callback = callback;
+}
+
+void set_overlay_active_callback(OverlayActiveCallback callback) {
+    s_overlay_active_callback = callback;
+}
+
+void set_vsync_enabled(bool enabled) {
+    s_target_swap_interval.store(enabled ? 1 : 0);
 }
 
 Gles3RendererContext::Gles3RendererContext(uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode)
@@ -113,6 +124,13 @@ void Gles3RendererContext::enable_instant_present() {
 
 void Gles3RendererContext::send_dummy_workload(uint32_t fb_address) {
     (void)fb_address;
+    if (dl_count_ == 0) {
+        uint32_t now = SDL_GetTicks();
+        if (now - last_dummy_ticks_ >= 33) {
+            frame_dirty_ = true;
+            last_dummy_ticks_ = now;
+        }
+    }
 }
 
 void Gles3RendererContext::shutdown() {
@@ -137,8 +155,15 @@ float Gles3RendererContext::get_resolution_scale() const {
 void Gles3RendererContext::send_dl(const OSTask* task) {
     if (!task || !rdram_) return;
     dl_count_++;
+    frame_dirty_ = true;
     uint32_t dl_phys = physical_rdram_offset(static_cast<uint32_t>(task->t.data_ptr));
+    uint64_t start_pc = SDL_GetPerformanceCounter();
     execute_display_list(dl_phys);
+    uint64_t end_pc = SDL_GetPerformanceCounter();
+    double dl_ms = static_cast<double>(end_pc - start_pc) * 1000.0 / static_cast<double>(SDL_GetPerformanceFrequency());
+    total_dl_ms_ += dl_ms;
+    if (dl_ms > max_dl_ms_) max_dl_ms_ = dl_ms;
+    dls_in_second_++;
 }
 
 void Gles3RendererContext::execute_display_list(uint32_t start_phys_addr) {
@@ -519,9 +544,80 @@ void Gles3RendererContext::dump_frame_ppm(uint64_t frame_num) {
                 static_cast<unsigned long long>(frame_num), filename, win_w_, win_h_);
 }
 
+void Gles3RendererContext::check_perf_telemetry(uint32_t now_ticks) {
+    if (last_perf_ticks_ == 0) {
+        last_perf_ticks_ = now_ticks;
+        return;
+    }
+    if (now_ticks - last_perf_ticks_ >= 1000) {
+        auto rsp_stats = rsp_state_ ? rsp_state_->get_and_reset_stats() : RspState::RspStats{};
+        auto tex_stats = tmem_cache_ ? tmem_cache_->get_and_reset_stats() : TextureCacheStats{};
+        uint32_t shader_count = shader_cache_ ? static_cast<uint32_t>(shader_cache_->shader_count()) : 0;
+        double avg_dl_ms = (dls_in_second_ > 0) ? (total_dl_ms_ / static_cast<double>(dls_in_second_)) : 0.0;
+        double avg_swap_ms = (swaps_in_second_ > 0) ? (total_swap_ms_ / static_cast<double>(swaps_in_second_)) : 0.0;
+
+        std::fprintf(stderr,
+                     "[PERF] dls=%u swaps=%u skip_vi=%u batches=%u tris=%u tex_fast=%u tex_hit=%u tex_upload=%u shaders=%u dl_ms(avg=%.2f max=%.2f) swap_ms(avg=%.2f max=%.2f)\n",
+                     dls_in_second_,
+                     swaps_in_second_,
+                     skipped_vis_in_second_,
+                     rsp_stats.batches,
+                     rsp_stats.triangles,
+                     tex_stats.fast_hits,
+                     tex_stats.map_hits,
+                     tex_stats.uploads,
+                     shader_count,
+                     avg_dl_ms,
+                     max_dl_ms_,
+                     avg_swap_ms,
+                     max_swap_ms_);
+        std::fflush(stderr);
+
+        dls_in_second_ = 0;
+        swaps_in_second_ = 0;
+        skipped_vis_in_second_ = 0;
+        total_dl_ms_ = 0.0;
+        max_dl_ms_ = 0.0;
+        total_swap_ms_ = 0.0;
+        max_swap_ms_ = 0.0;
+        last_perf_ticks_ = now_ticks;
+    }
+}
+
 void Gles3RendererContext::update_screen() {
-    uint32_t vi_origin = ultramodern::renderer::get_vi_regs()->VI_ORIGIN_REG;
-    fbo_manager_->present_vi_origin(physical_rdram_offset(vi_origin), win_w_, win_h_, expand_aspect_);
+    int target_swap = s_target_swap_interval.load();
+    if (applied_swap_interval_ != target_swap) {
+        SDL_GL_SetSwapInterval(target_swap);
+        applied_swap_interval_ = target_swap;
+    }
+
+    uint32_t vi_origin_phys = ultramodern::renderer::get_vi_regs()
+        ? physical_rdram_offset(ultramodern::renderer::get_vi_regs()->VI_ORIGIN_REG)
+        : 0xFFFFFFFFu;
+    uint32_t present_fbo_addr = fbo_manager_->resolve_present_fbo_addr(vi_origin_phys);
+    bool overlay_active = (s_overlay_active_callback != nullptr) && s_overlay_active_callback();
+    uint32_t now_ticks = SDL_GetTicks();
+
+    bool fbo_changed = (present_fbo_addr != 0 && present_fbo_addr != last_presented_fbo_addr_);
+    bool single_buf_dirty = frame_dirty_ && (present_fbo_addr != 0 && present_fbo_addr == fbo_manager_->last_rendered_fbo_addr());
+    bool dummy_dirty = frame_dirty_ && (dl_count_ == 0);
+    bool overlay_due = overlay_active && (now_ticks - last_swap_ticks_ >= 16);
+
+    bool should_swap = fbo_changed || single_buf_dirty || dummy_dirty || overlay_due;
+
+    if (!should_swap) {
+        skipped_vis_in_second_++;
+        check_perf_telemetry(now_ticks);
+        return;
+    }
+
+    frame_dirty_ = false;
+    last_presented_fbo_addr_ = present_fbo_addr;
+    last_swap_ticks_ = now_ticks;
+
+    uint64_t swap_start = SDL_GetPerformanceCounter();
+
+    fbo_manager_->present_vi_origin(vi_origin_phys, win_w_, win_h_, expand_aspect_);
 
     if (s_overlay_render_callback != nullptr) {
         s_overlay_render_callback(win_w_, win_h_);
@@ -542,6 +638,14 @@ void Gles3RendererContext::update_screen() {
     }
 
     SDL_GL_SwapWindow(window_handle_);
+
+    uint64_t swap_end = SDL_GetPerformanceCounter();
+    double swap_ms = static_cast<double>(swap_end - swap_start) * 1000.0 / static_cast<double>(SDL_GetPerformanceFrequency());
+    total_swap_ms_ += swap_ms;
+    if (swap_ms > max_swap_ms_) max_swap_ms_ = swap_ms;
+    swaps_in_second_++;
+
+    check_perf_telemetry(now_ticks);
 
     if (auto_quit_dls_ >= 0 && static_cast<int64_t>(dl_count_) >= auto_quit_dls_) {
         std::printf("[DEBUG] Reached auto-quit threshold (%llu DLs >= %lld). Quitting.\n",

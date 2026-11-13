@@ -373,6 +373,8 @@ int main(int argc, char** argv) {
     ultramodern::renderer::callbacks_t renderer_callbacks{
         .create_render_context = [](uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
             snp::gles3::set_overlay_render_callback(snp::handheld::render_overlay);
+            snp::gles3::set_overlay_active_callback(snp::handheld::is_overlay_open);
+            snp::gles3::set_vsync_enabled(snp::handheld::get_config().video.vsync);
             return snp::gles3::create_renderer_context(rdram, window_handle, developer_mode);
         },
     };

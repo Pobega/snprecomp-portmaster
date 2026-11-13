@@ -6,6 +6,8 @@
 #include <cmath>
 
 #include "gles3_renderer_context.h"
+#include "tmem_texture_cache.h"
+#include "combiner_shader_cache.h"
 #include "rdram_access.h"
 #include "n64_gbi.h"
 
@@ -270,6 +272,92 @@ int main() {
     assert(pixel[0] > 180 && pixel[1] < 50 && pixel[2] < 50);
 
     assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
+
+    // Combiner Shader Cache Pruning Test
+    {
+        snp::gles3::CombinerShaderCache combiner_cache;
+        // FILL mode: neither tex0 nor tex1
+        const auto& fill_prog = combiner_cache.get_program(0, 0, snp::gles3::G_CYC_FILL, false, false);
+        assert(!fill_prog.uses_tex0 && !fill_prog.uses_tex1);
+
+        // COPY mode: tex0 only
+        const auto& copy_prog = combiner_cache.get_program(0, 0, snp::gles3::G_CYC_COPY, false, false);
+        assert(copy_prog.uses_tex0 && !copy_prog.uses_tex1);
+
+        // 1CYCLE with TEXEL0 (d0 = G_CCMUX_TEXEL0 = 1): tex0 only
+        uint32_t w1_tex0 = (1u << 15);
+        const auto& cyc1_prog = combiner_cache.get_program(0, w1_tex0, snp::gles3::G_CYC_1CYCLE, false, false);
+        assert(cyc1_prog.uses_tex0 && !cyc1_prog.uses_tex1);
+
+        // 2CYCLE with TEXEL0 in cycle 0 and TEXEL1 in cycle 1 (d1 = G_CCMUX_TEXEL1 = 2): both tex0 and tex1
+        uint32_t w1_tex0_tex1 = (1u << 15) | (2u << 6);
+        const auto& cyc2_prog = combiner_cache.get_program(0, w1_tex0_tex1, snp::gles3::G_CYC_2CYCLE, false, false);
+        assert(cyc2_prog.uses_tex0 && cyc2_prog.uses_tex1);
+
+        std::printf("[Test] Combiner shader pruning verified (shaders=%zu)\n", combiner_cache.shader_count());
+    }
+
+    // TMEM Cache Fast Hits and Texture Recycling (>1024 unique tiles)
+    {
+        snp::gles3::TmemTextureCache tmem_test;
+        tmem_test.set_tile(0, snp::gles3::G_IM_FMT_RGBA, snp::gles3::G_IM_SIZ_16b, 4, 0, 0, false, false, 0, 0, false, false, 0, 0);
+        tmem_test.set_tile_size(0, 0, 0, 7 * 4, 7 * 4);
+
+        // Initial fetch: uploads texture
+        auto tex_a = tmem_test.fetch_texture(0, snp::gles3::G_TF_POINT, snp::gles3::G_TT_NONE);
+        assert(tex_a.texture_id != 0);
+        auto stats1 = tmem_test.get_and_reset_stats();
+        assert(stats1.uploads == 1 && stats1.fast_hits == 0);
+
+        // Immediate subsequent fetch: fast hit without hash or upload
+        auto tex_b = tmem_test.fetch_texture(0, snp::gles3::G_TF_POINT, snp::gles3::G_TT_NONE);
+        assert(tex_b.texture_id == tex_a.texture_id);
+        auto stats2 = tmem_test.get_and_reset_stats();
+        assert(stats2.fast_hits == 1 && stats2.uploads == 0);
+
+        // Upload > 1024 unique tiles to trigger LRU eviction and fill the recycling pool
+        std::vector<uint8_t> dummy_rdram(16384, 0xAA);
+        for (uint32_t i = 1; i <= 1030; ++i) {
+            dummy_rdram[0] = static_cast<uint8_t>(i & 0xFF);
+            dummy_rdram[1] = static_cast<uint8_t>((i >> 8) & 0xFF);
+            tmem_test.set_timg(snp::gles3::G_IM_FMT_RGBA, snp::gles3::G_IM_SIZ_16b, 32, 0);
+            tmem_test.load_block(0, 0, 0, 15, 0, dummy_rdram.data());
+            tmem_test.fetch_texture(0, snp::gles3::G_TF_POINT, snp::gles3::G_TT_NONE);
+        }
+        assert(tmem_test.recycled_pool_size() > 0);
+        size_t pool_size_before = tmem_test.recycled_pool_size();
+
+        // Next unique texture should reuse a texture ID from the recycled pool,
+        // and eviction of the oldest entry keeps the recycled pool replenished.
+        dummy_rdram[2] = 0x55;
+        tmem_test.load_block(0, 0, 0, 15, 0, dummy_rdram.data());
+        auto tex_c = tmem_test.fetch_texture(0, snp::gles3::G_TF_POINT, snp::gles3::G_TT_NONE);
+        assert(tex_c.texture_id != 0);
+        assert(tmem_test.recycled_pool_size() == pool_size_before);
+
+        std::printf("[Test] TMEM cache fast hits and recycling verified (pool_size=%zu)\n", tmem_test.recycled_pool_size());
+    }
+
+    // Streaming Ring Buffer Multi-Batch Rendering
+    {
+        uint32_t dl3_addr = 0x00008000u;
+        uint32_t pc3 = dl3_addr;
+
+        // Render multiple fillrect batches to exercise streaming buffer
+        for (int b = 0; b < 10; ++b) {
+            emit_cmd(rdram.data(), pc3, (snp::gles3::G_SETCIMG << 24) | (snp::gles3::G_IM_FMT_RGBA << 21) | (snp::gles3::G_IM_SIZ_16b << 19) | (320 - 1), 0x003B5000u);
+            emit_cmd(rdram.data(), pc3, (snp::gles3::G_SETCOMBINE << 24), 0u);
+            emit_cmd(rdram.data(), pc3, (snp::gles3::G_FILLRECT << 24) | ((30 * 4) << 12) | (30 * 4), ((10 * 4) << 12) | (10 * 4));
+        }
+        emit_cmd(rdram.data(), pc3, (snp::gles3::G_ENDDL << 24), 0u);
+
+        OSTask task3{};
+        task3.t.data_ptr = dl3_addr;
+        renderer->send_dl(&task3);
+        assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
+
+        std::printf("[Test] Streaming ring buffer multi-batch rendering verified\n");
+    }
 
     renderer->shutdown();
     SDL_DestroyWindow(window);

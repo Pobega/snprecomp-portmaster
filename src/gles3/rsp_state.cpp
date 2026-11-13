@@ -72,7 +72,9 @@ RspState::RspState(TmemTextureCache& tmem_cache, CombinerShaderCache& shader_cac
 
     gl::glBindVertexArray(vao_);
     gl::glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    gl::glBufferData(GL_ARRAY_BUFFER, STREAM_VBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
     gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
+    gl::glBufferData(GL_ELEMENT_ARRAY_BUFFER, STREAM_IBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
 
     gl::glEnableVertexAttribArray(0);
     gl::glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(0));
@@ -94,6 +96,10 @@ RspState::~RspState() {
 
 void RspState::reset() {
     flush_batch();
+    vbo_offset_bytes_ = 0;
+    ibo_offset_bytes_ = 0;
+    batch_count_ = 0;
+    tri_count_ = 0;
     modelview_top_ = 0;
     modelview_stack_[0] = Matrix4::identity();
     projection_matrix_ = Matrix4::identity();
@@ -481,10 +487,23 @@ void RspState::flush_batch() {
     if (prog.uBlendColor >= 0) gl::glUniform4f(prog.uBlendColor, blend_color_[0], blend_color_[1], blend_color_[2], blend_color_[3]);
     if (prog.uAlphaThreshold >= 0) gl::glUniform1f(prog.uAlphaThreshold, alpha_threshold);
 
-    if (current_batch_tex_ != 0) {
-        gl::glActiveTexture(GL_TEXTURE0);
-        gl::glBindTexture(GL_TEXTURE_2D, current_batch_tex_);
-        if (prog.uTexture0 >= 0) gl::glUniform1i(prog.uTexture0, 0);
+    if (prog.uses_tex0 && (tex_enabled_ || current_batch_tex_ != 0)) {
+        if (current_batch_tex_ != 0) {
+            gl::glActiveTexture(GL_TEXTURE0);
+            gl::glBindTexture(GL_TEXTURE_2D, current_batch_tex_);
+            if (prog.uTexture0 >= 0) gl::glUniform1i(prog.uTexture0, 0);
+        }
+    }
+
+    if (prog.uses_tex1 && tex_enabled_) {
+        uint32_t tile1 = (active_tile_ + 1) & 7u;
+        CachedTexture tex1 = tmem_cache_.fetch_texture(tile1, (other_mode_h_ >> 12) & 3u, (other_mode_h_ >> 14) & 3u);
+        if (tex1.texture_id != 0) {
+            gl::glActiveTexture(GL_TEXTURE1);
+            gl::glBindTexture(GL_TEXTURE_2D, tex1.texture_id);
+            if (prog.uTexture1 >= 0) gl::glUniform1i(prog.uTexture1, 1);
+            gl::glActiveTexture(GL_TEXTURE0);
+        }
     }
 
     if ((geometry_mode_ & G_ZBUFFER) && !is_copy_or_fill) {
@@ -537,14 +556,40 @@ void RspState::flush_batch() {
         apply_gl_scissor(*current_fbo);
     }
 
+    size_t vbo_bytes = batch_vertices_.size() * sizeof(BatchVertex);
+    size_t ibo_bytes = batch_indices_.size() * sizeof(uint16_t);
+
+    if (vbo_offset_bytes_ + vbo_bytes > STREAM_VBO_SIZE_BYTES ||
+        ibo_offset_bytes_ + ibo_bytes > STREAM_IBO_SIZE_BYTES) {
+        vbo_offset_bytes_ = 0;
+        ibo_offset_bytes_ = 0;
+        gl::glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+        gl::glBufferData(GL_ARRAY_BUFFER, STREAM_VBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
+        gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
+        gl::glBufferData(GL_ELEMENT_ARRAY_BUFFER, STREAM_IBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
+    }
+
     gl::glBindVertexArray(vao_);
     gl::glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    gl::glBufferData(GL_ARRAY_BUFFER, batch_vertices_.size() * sizeof(BatchVertex), batch_vertices_.data(), GL_DYNAMIC_DRAW);
-    gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
-    gl::glBufferData(GL_ELEMENT_ARRAY_BUFFER, batch_indices_.size() * sizeof(uint16_t), batch_indices_.data(), GL_DYNAMIC_DRAW);
+    gl::glBufferSubData(GL_ARRAY_BUFFER, vbo_offset_bytes_, vbo_bytes, batch_vertices_.data());
 
-    gl::glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(batch_indices_.size()), GL_UNSIGNED_SHORT, nullptr);
+    gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
+    gl::glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, ibo_offset_bytes_, ibo_bytes, batch_indices_.data());
+
+    gl::glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(vbo_offset_bytes_));
+    gl::glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(vbo_offset_bytes_ + 4 * sizeof(float)));
+    gl::glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(vbo_offset_bytes_ + 8 * sizeof(float)));
+
+    gl::glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(batch_indices_.size()), GL_UNSIGNED_SHORT, reinterpret_cast<void*>(ibo_offset_bytes_));
     gl::glBindVertexArray(0);
+
+    batch_count_++;
+    tri_count_ += static_cast<uint32_t>(batch_indices_.size() / 3);
+
+    vbo_offset_bytes_ += vbo_bytes;
+    vbo_offset_bytes_ = (vbo_offset_bytes_ + 15u) & ~15u;
+    ibo_offset_bytes_ += ibo_bytes;
+    ibo_offset_bytes_ = (ibo_offset_bytes_ + 3u) & ~3u;
 
     batch_vertices_.clear();
     batch_indices_.clear();
@@ -553,16 +598,25 @@ void RspState::flush_batch() {
 void RspState::draw_tri1(uint32_t v0, uint32_t v1, uint32_t v2) {
     if (v0 >= VERTEX_CACHE_SIZE || v1 >= VERTEX_CACHE_SIZE || v2 >= VERTEX_CACHE_SIZE) return;
 
-    const TileDescriptor& tile_desc = tmem_cache_.get_tile(active_tile_);
-    CachedTexture tex = tmem_cache_.fetch_texture(active_tile_, (other_mode_h_ >> 12) & 3u, (other_mode_h_ >> 14) & 3u);
-    float inv_w = 1.0f / static_cast<float>(tex.width);
-    float inv_h = 1.0f / static_cast<float>(tex.height);
-    float scale_u = compute_tile_shift_scale(tile_desc.shift_s) * inv_w;
-    float scale_v = compute_tile_shift_scale(tile_desc.shift_t) * inv_h;
-    float offset_u = -(static_cast<float>(tile_desc.sl) / SUBPIXEL_SCALE) * inv_w;
-    float offset_v = -(static_cast<float>(tile_desc.tl) / SUBPIXEL_SCALE) * inv_h;
+    GLuint tex_id = 0;
+    float scale_u = 1.0f;
+    float scale_v = 1.0f;
+    float offset_u = 0.0f;
+    float offset_v = 0.0f;
 
-    ensure_batch_state(tex.texture_id, scale_u, scale_v, offset_u, offset_v);
+    if (tex_enabled_) {
+        const TileDescriptor& tile_desc = tmem_cache_.get_tile(active_tile_);
+        CachedTexture tex = tmem_cache_.fetch_texture(active_tile_, (other_mode_h_ >> 12) & 3u, (other_mode_h_ >> 14) & 3u);
+        tex_id = tex.texture_id;
+        float inv_w = 1.0f / static_cast<float>(tex.width);
+        float inv_h = 1.0f / static_cast<float>(tex.height);
+        scale_u = compute_tile_shift_scale(tile_desc.shift_s) * inv_w;
+        scale_v = compute_tile_shift_scale(tile_desc.shift_t) * inv_h;
+        offset_u = -(static_cast<float>(tile_desc.sl) / SUBPIXEL_SCALE) * inv_w;
+        offset_v = -(static_cast<float>(tile_desc.tl) / SUBPIXEL_SCALE) * inv_h;
+    }
+
+    ensure_batch_state(tex_id, scale_u, scale_v, offset_u, offset_v);
 
     uint16_t base_idx = static_cast<uint16_t>(batch_vertices_.size());
     const uint32_t idxs[3] = { v0, v1, v2 };

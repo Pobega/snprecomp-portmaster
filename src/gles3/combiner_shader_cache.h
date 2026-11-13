@@ -23,6 +23,8 @@ struct CombinerProgram {
     GLint uAlphaThreshold = -1;
     GLint uTexture0 = -1;
     GLint uTexture1 = -1;
+    bool uses_tex0 = false;
+    bool uses_tex1 = false;
 };
 
 struct CombinerKey {
@@ -61,13 +63,15 @@ public:
     void reset();
 
     const CombinerProgram& get_program(uint32_t combine_w0, uint32_t combine_w1,
-                                       uint32_t cycle_type, bool fog_enabled,
-                                       bool alpha_test_enabled);
+                                        uint32_t cycle_type, bool fog_enabled,
+                                        bool alpha_test_enabled);
+
+    size_t shader_count() const { return programs_.size(); }
 
 private:
     CombinerProgram compile_program(const CombinerKey& key);
     std::string generate_vertex_shader() const;
-    std::string generate_fragment_shader(const CombinerKey& key) const;
+    std::string generate_fragment_shader(const CombinerKey& key, bool& out_uses_tex0, bool& out_uses_tex1) const;
 
     std::unordered_map<CombinerKey, CombinerProgram, CombinerKeyHash> programs_;
 };

@@ -95,11 +95,27 @@ public:
 
     void flush_batch();
 
+    struct RspStats {
+        uint32_t batches = 0;
+        uint32_t triangles = 0;
+    };
+    RspStats get_and_reset_stats() {
+        RspStats s{ batch_count_, tri_count_ };
+        batch_count_ = 0;
+        tri_count_ = 0;
+        return s;
+    }
+
     uint32_t get_segment(uint32_t seg_index) const { return segments_[seg_index & 0x0F]; }
     const uint32_t* get_segments() const { return segments_; }
     void set_segment(uint32_t seg_index, uint32_t addr) { segments_[seg_index & 0x0F] = addr; }
 
 private:
+    static constexpr size_t STREAM_VBO_MAX_VERTICES = 16384;
+    static constexpr size_t STREAM_IBO_MAX_INDICES = 32768;
+    static constexpr size_t STREAM_VBO_SIZE_BYTES = STREAM_VBO_MAX_VERTICES * sizeof(BatchVertex);
+    static constexpr size_t STREAM_IBO_SIZE_BYTES = STREAM_IBO_MAX_INDICES * sizeof(uint16_t);
+
     Matrix4 read_matrix(const uint8_t* rdram, uint32_t phys_addr) const;
     void apply_lighting(RspVertex& v, float nx, float ny, float nz) const;
     float compute_rect_shift_x() const;
@@ -158,6 +174,11 @@ private:
     GLuint vao_ = 0;
     GLuint vbo_ = 0;
     GLuint ibo_ = 0;
+    size_t vbo_offset_bytes_ = 0;
+    size_t ibo_offset_bytes_ = 0;
+    uint32_t batch_count_ = 0;
+    uint32_t tri_count_ = 0;
+
     std::vector<BatchVertex> batch_vertices_;
     std::vector<uint16_t> batch_indices_;
     GLuint current_batch_tex_ = 0;

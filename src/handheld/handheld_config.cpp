@@ -9,6 +9,10 @@
 #include "ultramodern/config.hpp"
 #include "snp_recomp_hooks.h"
 
+namespace snp::gles3 {
+void set_vsync_enabled(bool enabled);
+} // namespace snp::gles3
+
 namespace snp::handheld {
 
 namespace {
@@ -24,6 +28,8 @@ HandheldConfig& get_mutable_config() {
 }
 
 void apply_graphics_config() {
+    snp::gles3::set_vsync_enabled(g_config.video.vsync);
+
     ultramodern::renderer::GraphicsConfig config{};
     config.developer_mode = false;
     config.ar_option = (g_config.video.aspect_ratio == ASPECT_RATIO_EXPAND)

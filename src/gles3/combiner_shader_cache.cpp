@@ -55,6 +55,22 @@ namespace {
         }
     }
 
+    bool is_tex0_color(uint32_t c) {
+        return c == G_CCMUX_TEXEL0 || c == G_CCMUX_TEXEL0_ALPHA;
+    }
+
+    bool is_tex1_color(uint32_t c) {
+        return c == G_CCMUX_TEXEL1 || c == G_CCMUX_TEXEL1_ALPHA;
+    }
+
+    bool is_tex0_alpha(uint32_t a) {
+        return a == G_ACMUX_TEXEL0;
+    }
+
+    bool is_tex1_alpha(uint32_t a) {
+        return a == G_ACMUX_TEXEL1;
+    }
+
     GLuint compile_shader(GLenum type, const std::string& source) {
         GLuint shader = gl::glCreateShader(type);
         const char* src_ptr = source.c_str();
@@ -137,7 +153,7 @@ void main() {
 )";
 }
 
-std::string CombinerShaderCache::generate_fragment_shader(const CombinerKey& key) const {
+std::string CombinerShaderCache::generate_fragment_shader(const CombinerKey& key, bool& out_uses_tex0, bool& out_uses_tex1) const {
     uint32_t w0 = key.combine_w0;
     uint32_t w1 = key.combine_w1;
 
@@ -159,6 +175,31 @@ std::string CombinerShaderCache::generate_fragment_shader(const CombinerKey& key
     uint32_t ab1 = (w1 >> 3) & 0x07u;
     uint32_t ad1 = (w1 >> 0) & 0x07u;
 
+    if (key.cycle_type == G_CYC_COPY) {
+        out_uses_tex0 = true;
+        out_uses_tex1 = false;
+    } else if (key.cycle_type == G_CYC_FILL) {
+        out_uses_tex0 = false;
+        out_uses_tex1 = false;
+    } else {
+        bool cyc0_tex0 = is_tex0_color(a0) || is_tex0_color(b0) || is_tex0_color(c0) || is_tex0_color(d0) ||
+                         is_tex0_alpha(aa0) || is_tex0_alpha(ab0) || is_tex0_alpha(ac0) || is_tex0_alpha(ad0);
+        bool cyc0_tex1 = is_tex1_color(a0) || is_tex1_color(b0) || is_tex1_color(c0) || is_tex1_color(d0) ||
+                         is_tex1_alpha(aa0) || is_tex1_alpha(ab0) || is_tex1_alpha(ac0) || is_tex1_alpha(ad0);
+
+        bool cyc1_tex0 = false;
+        bool cyc1_tex1 = false;
+        if (key.cycle_type == G_CYC_2CYCLE) {
+            cyc1_tex0 = is_tex0_color(a1) || is_tex0_color(b1) || is_tex0_color(c1) || is_tex0_color(d1) ||
+                        is_tex0_alpha(aa1) || is_tex0_alpha(ab1) || is_tex0_alpha(ac1) || is_tex0_alpha(ad1);
+            cyc1_tex1 = is_tex1_color(a1) || is_tex1_color(b1) || is_tex1_color(c1) || is_tex1_color(d1) ||
+                        is_tex1_alpha(aa1) || is_tex1_alpha(ab1) || is_tex1_alpha(ac1) || is_tex1_alpha(ad1);
+        }
+
+        out_uses_tex0 = cyc0_tex0 || cyc1_tex0;
+        out_uses_tex1 = cyc0_tex1 || cyc1_tex1;
+    }
+
     std::ostringstream ss;
     ss << "#version 300 es\n";
     ss << "precision mediump float;\n";
@@ -166,8 +207,12 @@ std::string CombinerShaderCache::generate_fragment_shader(const CombinerKey& key
     ss << "in highp vec2 vTexCoord;\n";
     ss << "in mediump float vFogFactor;\n";
     ss << "out vec4 fragColor;\n";
-    ss << "uniform sampler2D uTexture0;\n";
-    ss << "uniform sampler2D uTexture1;\n";
+    if (out_uses_tex0) {
+        ss << "uniform sampler2D uTexture0;\n";
+    }
+    if (out_uses_tex1) {
+        ss << "uniform sampler2D uTexture1;\n";
+    }
     ss << "uniform vec4 uPrimColor;\n";
     ss << "uniform float uPrimLodFrac;\n";
     ss << "uniform vec4 uEnvColor;\n";
@@ -176,8 +221,16 @@ std::string CombinerShaderCache::generate_fragment_shader(const CombinerKey& key
     ss << "uniform float uAlphaThreshold;\n\n";
 
     ss << "void main() {\n";
-    ss << "    vec4 tex0 = texture(uTexture0, vTexCoord);\n";
-    ss << "    vec4 tex1 = texture(uTexture1, vTexCoord);\n";
+    if (out_uses_tex0) {
+        ss << "    vec4 tex0 = texture(uTexture0, vTexCoord);\n";
+    } else {
+        ss << "    vec4 tex0 = vec4(0.0);\n";
+    }
+    if (out_uses_tex1) {
+        ss << "    vec4 tex1 = texture(uTexture1, vTexCoord);\n";
+    } else {
+        ss << "    vec4 tex1 = vec4(0.0);\n";
+    }
     ss << "    vec4 combined;\n";
 
     if (key.cycle_type == G_CYC_COPY) {
@@ -236,7 +289,9 @@ CombinerProgram CombinerShaderCache::compile_program(const CombinerKey& key) {
     GLuint vs = compile_shader(GL_VERTEX_SHADER, generate_vertex_shader());
     if (!vs) return prog;
 
-    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, generate_fragment_shader(key));
+    bool uses_tex0 = false;
+    bool uses_tex1 = false;
+    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, generate_fragment_shader(key, uses_tex0, uses_tex1));
     if (!fs) {
         gl::glDeleteShader(vs);
         return prog;
@@ -279,6 +334,8 @@ CombinerProgram CombinerShaderCache::compile_program(const CombinerKey& key) {
     prog.uAlphaThreshold = gl::glGetUniformLocation(program, "uAlphaThreshold");
     prog.uTexture0 = gl::glGetUniformLocation(program, "uTexture0");
     prog.uTexture1 = gl::glGetUniformLocation(program, "uTexture1");
+    prog.uses_tex0 = uses_tex0;
+    prog.uses_tex1 = uses_tex1;
 
     return prog;
 }

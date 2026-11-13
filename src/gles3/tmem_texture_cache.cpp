@@ -16,8 +16,16 @@ namespace {
 
     inline uint64_t fnv1a_bytes(uint64_t hash, const void* data, size_t size) {
         const auto* ptr = static_cast<const uint8_t*>(data);
-        for (size_t i = 0; i < size; ++i) {
+        size_t i = 0;
+        while (i + 8 <= size) {
+            uint64_t chunk = 0;
+            std::memcpy(&chunk, ptr + i, sizeof(chunk));
+            hash = (hash ^ chunk) * FNV1A_PRIME;
+            i += 8;
+        }
+        while (i < size) {
             hash = fnv1a_step(hash, ptr[i]);
+            ++i;
         }
         return hash;
     }
@@ -49,11 +57,24 @@ void TmemTextureCache::reset() {
     }
     lru_list_.clear();
     cache_map_.clear();
+    for (const auto& rec : recycled_textures_) {
+        if (rec.texture_id != 0 && gl::glDeleteTextures) {
+            gl::glDeleteTextures(1, &rec.texture_id);
+        }
+    }
+    recycled_textures_.clear();
     std::memset(tmem_, 0, sizeof(tmem_));
     for (auto& tile : tiles_) {
         tile = TileDescriptor{};
     }
     timg_ = TextureImageState{};
+    tmem_generation_++;
+    for (auto& g : tile_generation_) {
+        g++;
+    }
+    for (auto& slot : fast_slots_) {
+        slot.valid = false;
+    }
 }
 
 void TmemTextureCache::set_timg(uint8_t fmt, uint8_t siz, uint32_t width, uint32_t phys_addr) {
@@ -66,7 +87,9 @@ void TmemTextureCache::set_timg(uint8_t fmt, uint8_t siz, uint32_t width, uint32
 void TmemTextureCache::set_tile(uint32_t tile_idx, uint8_t fmt, uint8_t siz, uint16_t line, uint16_t tmem,
                                 uint8_t palette, bool clamp_t, bool mirror_t, uint8_t mask_t, uint8_t shift_t,
                                 bool clamp_s, bool mirror_s, uint8_t mask_s, uint8_t shift_s) {
-    TileDescriptor& tile = tiles_[tile_idx & 7];
+    uint32_t idx = tile_idx & 7;
+    tile_generation_[idx]++;
+    TileDescriptor& tile = tiles_[idx];
     tile.fmt = fmt;
     tile.siz = siz;
     tile.line = line;
@@ -83,7 +106,9 @@ void TmemTextureCache::set_tile(uint32_t tile_idx, uint8_t fmt, uint8_t siz, uin
 }
 
 void TmemTextureCache::set_tile_size(uint32_t tile_idx, uint16_t sl, uint16_t tl, uint16_t sh, uint16_t th) {
-    TileDescriptor& tile = tiles_[tile_idx & 7];
+    uint32_t idx = tile_idx & 7;
+    tile_generation_[idx]++;
+    TileDescriptor& tile = tiles_[idx];
     tile.sl = sl;
     tile.tl = tl;
     tile.sh = sh;
@@ -93,6 +118,10 @@ void TmemTextureCache::set_tile_size(uint32_t tile_idx, uint16_t sl, uint16_t tl
 void TmemTextureCache::load_block(uint32_t tile_idx, uint32_t uls, uint32_t ult, uint32_t lrs, uint32_t dxt, const uint8_t* rdram) {
     (void)uls;
     (void)ult;
+    tmem_generation_++;
+    for (auto& g : tile_generation_) {
+        g++;
+    }
     for (auto& t : tiles_) {
         t.loaded_via_tile = false;
     }
@@ -124,6 +153,10 @@ void TmemTextureCache::load_block(uint32_t tile_idx, uint32_t uls, uint32_t ult,
 }
 
 void TmemTextureCache::load_tile(uint32_t tile_idx, uint32_t uls, uint32_t ult, uint32_t lrs, uint32_t lrt, const uint8_t* rdram) {
+    tmem_generation_++;
+    for (auto& g : tile_generation_) {
+        g++;
+    }
     for (auto& t : tiles_) {
         t.loaded_via_tile = true;
     }
@@ -176,6 +209,7 @@ void TmemTextureCache::load_tile(uint32_t tile_idx, uint32_t uls, uint32_t ult, 
 }
 
 void TmemTextureCache::load_tlut(uint32_t tile_idx, uint32_t count, const uint8_t* rdram) {
+    tmem_generation_++;
     TileDescriptor& tile = tiles_[tile_idx & 7];
     uint32_t base_word = (tile.tmem >= 256u) ? tile.tmem : 256u;
     uint32_t num_colors = count + 1;
@@ -349,7 +383,19 @@ void TmemTextureCache::decode_pixel(const TileDescriptor& tile, uint32_t x, uint
 }
 
 CachedTexture TmemTextureCache::fetch_texture(uint32_t tile_idx, uint32_t textfilt, uint32_t textlut) {
-    const TileDescriptor& tile = tiles_[tile_idx & 7];
+    uint32_t idx = tile_idx & 7;
+    auto& slot = fast_slots_[idx];
+    if (slot.valid &&
+        slot.tmem_gen == tmem_generation_ &&
+        slot.tile_gen == tile_generation_[idx] &&
+        slot.textfilt == textfilt &&
+        slot.textlut == textlut) {
+        tex_fast_count_++;
+        lru_list_.splice(lru_list_.begin(), lru_list_, slot.lru_iter);
+        return slot.texture;
+    }
+
+    const TileDescriptor& tile = tiles_[idx];
     uint32_t width = (tile.sh >= tile.sl) ? (((tile.sh - tile.sl) / 4) + 1) : 32;
     uint32_t height = (tile.th >= tile.tl) ? (((tile.th - tile.tl) / 4) + 1) : 32;
     if (width == 0 || width > 512) {
@@ -370,28 +416,48 @@ CachedTexture TmemTextureCache::fetch_texture(uint32_t tile_idx, uint32_t textfi
     uint64_t hash = compute_hash(tile, width, height, textfilt, textlut);
     auto it = cache_map_.find(hash);
     if (it != cache_map_.end()) {
+        tex_hit_count_++;
         lru_list_.splice(lru_list_.begin(), lru_list_, it->second);
-        return *lru_list_.begin();
+        slot = { tmem_generation_, tile_generation_[idx], textfilt, textlut, true, *it->second, it->second };
+        return *it->second;
     }
 
-    std::vector<uint8_t> rgba(width * height * 4);
+    tex_upload_count_++;
+    decode_buffer_.resize(width * height * 4);
+    uint8_t* rgba = decode_buffer_.data();
     for (uint32_t y = 0; y < height; ++y) {
         for (uint32_t x = 0; x < width; ++x) {
             uint8_t r = 0, g = 0, b = 0, a = 0;
             decode_pixel(tile, x, y, textlut, r, g, b, a);
-            size_t idx = (y * width + x) * 4;
-            rgba[idx + 0] = r;
-            rgba[idx + 1] = g;
-            rgba[idx + 2] = b;
-            rgba[idx + 3] = a;
+            size_t pixel_idx = (y * width + x) * 4;
+            rgba[pixel_idx + 0] = r;
+            rgba[pixel_idx + 1] = g;
+            rgba[pixel_idx + 2] = b;
+            rgba[pixel_idx + 3] = a;
         }
     }
 
     GLuint tex_id = 0;
-    gl::glGenTextures(1, &tex_id);
-    gl::glBindTexture(GL_TEXTURE_2D, tex_id);
-    gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    bool recycled = false;
+    for (auto pool_it = recycled_textures_.begin(); pool_it != recycled_textures_.end(); ++pool_it) {
+        if (pool_it->width == width && pool_it->height == height) {
+            tex_id = pool_it->texture_id;
+            recycled_textures_.erase(pool_it);
+            recycled = true;
+            break;
+        }
+    }
+
+    if (!recycled) {
+        gl::glGenTextures(1, &tex_id);
+        gl::glBindTexture(GL_TEXTURE_2D, tex_id);
+        gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    } else {
+        gl::glBindTexture(GL_TEXTURE_2D, tex_id);
+        gl::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        gl::glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    }
 
     GLint min_mag = (textfilt == G_TF_POINT) ? GL_NEAREST : GL_LINEAR;
     gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_mag);
@@ -406,15 +472,34 @@ CachedTexture TmemTextureCache::fetch_texture(uint32_t tile_idx, uint32_t textfi
         CachedTexture oldest = lru_list_.back();
         lru_list_.pop_back();
         cache_map_.erase(oldest.hash);
+        for (auto& s : fast_slots_) {
+            if (s.valid && s.texture.texture_id == oldest.texture_id) {
+                s.valid = false;
+            }
+        }
         if (oldest.texture_id != 0) {
-            gl::glDeleteTextures(1, &oldest.texture_id);
+            if (recycled_textures_.size() < MAX_RECYCLED_TEXTURES) {
+                recycled_textures_.push_back({ oldest.width, oldest.height, oldest.texture_id });
+            } else if (gl::glDeleteTextures) {
+                gl::glDeleteTextures(1, &oldest.texture_id);
+            }
         }
     }
 
     CachedTexture new_entry{ hash, tex_id, width, height };
     lru_list_.push_front(new_entry);
-    cache_map_[hash] = lru_list_.begin();
+    auto inserted_it = lru_list_.begin();
+    cache_map_[hash] = inserted_it;
+    slot = { tmem_generation_, tile_generation_[idx], textfilt, textlut, true, new_entry, inserted_it };
     return new_entry;
+}
+
+TextureCacheStats TmemTextureCache::get_and_reset_stats() {
+    TextureCacheStats s{ tex_fast_count_, tex_hit_count_, tex_upload_count_ };
+    tex_fast_count_ = 0;
+    tex_hit_count_ = 0;
+    tex_upload_count_ = 0;
+    return s;
 }
 
 } // namespace snp::gles3

@@ -14,6 +14,7 @@
 #include "gl_loader.h"
 #include "handheld_config.h"
 #include "handheld_font.h"
+#include "../gles3/gles3_renderer_context.h"
 #include "ultramodern/ultramodern.hpp"
 
 namespace snp::handheld {
@@ -22,7 +23,7 @@ namespace gl = snp::gles3::gl;
 
 namespace {
 
-constexpr int TOTAL_MENU_ROWS = 10;
+constexpr int TOTAL_MENU_ROWS = 11;
 constexpr float FONT_CHAR_WIDTH = 8.0f;
 constexpr float FONT_CHAR_HEIGHT = 8.0f;
 constexpr float SOLID_UV_U = 127.5f / 128.0f;
@@ -35,6 +36,7 @@ enum class MenuRow {
     AimSpeed,
     AspectRatio,
     Resolution,
+    VSync,
     Rumble,
     MasterVolume,
     SaveAndResume,
@@ -307,6 +309,7 @@ std::string get_row_label(MenuRow row) {
     case MenuRow::AimSpeed: return "Aim Speed";
     case MenuRow::AspectRatio: return "Aspect Ratio";
     case MenuRow::Resolution: return "Resolution";
+    case MenuRow::VSync: return "VSync";
     case MenuRow::Rumble: return "Rumble";
     case MenuRow::MasterVolume: return "Master Volume";
     case MenuRow::SaveAndResume: return "[ Save & Resume ]";
@@ -331,6 +334,8 @@ std::string get_row_value(MenuRow row, const HandheldConfig& cfg) {
         return (cfg.video.aspect_ratio == ASPECT_RATIO_EXPAND) ? "3:2 Expand" : "4:3 Original";
     case MenuRow::Resolution:
         return (cfg.video.resolution_scale >= 2) ? "2x (480p)" : "1x (240p)";
+    case MenuRow::VSync:
+        return cfg.video.vsync ? "On" : "Off";
     case MenuRow::Rumble:
         return cfg.controls.rumble ? "On" : "Off";
     case MenuRow::MasterVolume:
@@ -378,6 +383,10 @@ void cycle_row_value(MenuRow row, bool forward) {
         cfg.video.resolution_scale = (cfg.video.resolution_scale >= 2) ? 1 : 2;
         apply_graphics_config();
         break;
+    case MenuRow::VSync:
+        cfg.video.vsync = !cfg.video.vsync;
+        snp::gles3::set_vsync_enabled(cfg.video.vsync);
+        break;
     case MenuRow::Rumble:
         cfg.controls.rumble = !cfg.controls.rumble;
         break;
@@ -405,7 +414,7 @@ void build_overlay_mesh(int win_w, int win_h) {
 
     // Centered menu panel
     float panel_w = 600.0f;
-    float panel_h = 390.0f;
+    float panel_h = 410.0f;
     float panel_x0 = (static_cast<float>(win_w) - panel_w) * 0.5f;
     float panel_y0 = (static_cast<float>(win_h) - panel_h) * 0.5f;
     float panel_x1 = panel_x0 + panel_w;

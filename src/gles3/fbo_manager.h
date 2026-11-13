@@ -30,8 +30,10 @@ public:
 
     GLuint find_feedback_texture(uint32_t timg_phys_addr, float& out_v_offset, float& out_v_scale, const uint8_t* rdram);
     void present_vi_origin(uint32_t vi_origin_phys, int win_w, int win_h, bool expand_aspect);
+    uint32_t resolve_present_fbo_addr(uint32_t vi_origin_phys) const;
 
     uint32_t get_current_fbo_addr() const { return current_fbo_addr_; }
+    uint32_t last_rendered_fbo_addr() const { return last_rendered_fbo_addr_; }
     FboEntry* get_current_fbo();
 
 private:

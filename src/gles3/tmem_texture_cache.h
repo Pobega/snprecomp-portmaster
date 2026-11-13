@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include <list>
+#include <deque>
 #include <unordered_map>
 #include "gl_loader.h"
 #include "n64_gbi.h"
@@ -44,10 +45,17 @@ struct CachedTexture {
     uint32_t height = 0;
 };
 
+struct TextureCacheStats {
+    uint32_t fast_hits = 0;
+    uint32_t map_hits = 0;
+    uint32_t uploads = 0;
+};
+
 class TmemTextureCache {
 public:
     static constexpr size_t TMEM_SIZE = 4096;
-    static constexpr size_t MAX_CACHE_ENTRIES = 512;
+    static constexpr size_t MAX_CACHE_ENTRIES = 1024;
+    static constexpr size_t MAX_RECYCLED_TEXTURES = 128;
     static constexpr size_t NUM_TILES = 8;
 
     TmemTextureCache();
@@ -71,7 +79,26 @@ public:
     const TextureImageState& get_timg() const { return timg_; }
     const uint8_t* get_tmem() const { return tmem_; }
 
+    TextureCacheStats get_and_reset_stats();
+    size_t recycled_pool_size() const { return recycled_textures_.size(); }
+
 private:
+    struct FastLookupSlot {
+        uint64_t tmem_gen = 0;
+        uint64_t tile_gen = 0;
+        uint32_t textfilt = 0;
+        uint32_t textlut = 0;
+        bool valid = false;
+        CachedTexture texture{};
+        std::list<CachedTexture>::iterator lru_iter{};
+    };
+
+    struct RecycledTexture {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        GLuint texture_id = 0;
+    };
+
     uint64_t compute_hash(const TileDescriptor& tile, uint32_t width, uint32_t height, uint32_t textfilt, uint32_t textlut) const;
     void decode_pixel(const TileDescriptor& tile, uint32_t x, uint32_t y, uint32_t textlut,
                       uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& a) const;
@@ -80,8 +107,19 @@ private:
     TileDescriptor tiles_[NUM_TILES];
     TextureImageState timg_;
 
+    uint64_t tmem_generation_ = 1;
+    uint64_t tile_generation_[NUM_TILES] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+    FastLookupSlot fast_slots_[NUM_TILES];
+
     std::list<CachedTexture> lru_list_;
     std::unordered_map<uint64_t, std::list<CachedTexture>::iterator> cache_map_;
+    std::deque<RecycledTexture> recycled_textures_;
+
+    uint32_t tex_fast_count_ = 0;
+    uint32_t tex_hit_count_ = 0;
+    uint32_t tex_upload_count_ = 0;
+
+    std::vector<uint8_t> decode_buffer_;
 };
 
 } // namespace snp::gles3

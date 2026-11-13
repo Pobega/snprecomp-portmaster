@@ -159,6 +159,26 @@ GLuint FboManager::find_feedback_texture(uint32_t timg_phys_addr, float& out_v_o
     return 0;
 }
 
+uint32_t FboManager::resolve_present_fbo_addr(uint32_t vi_origin_phys) const {
+    constexpr uint32_t MAX_VI_ROW_DRIFT = N64_SCREEN_WIDTH * 16 * 2;
+    for (const auto& pair : fbo_map_) {
+        uint32_t fbo_addr = pair.first;
+        if ((vi_origin_phys >= fbo_addr && vi_origin_phys <= fbo_addr + MAX_VI_ROW_DRIFT) ||
+            (fbo_addr >= vi_origin_phys && fbo_addr <= vi_origin_phys + MAX_VI_ROW_DRIFT)) {
+            return pair.second.cimg_addr;
+        }
+    }
+
+    auto it = fbo_map_.find(last_rendered_fbo_addr_);
+    if (it != fbo_map_.end()) {
+        return it->second.cimg_addr;
+    }
+    if (!fbo_map_.empty()) {
+        return fbo_map_.begin()->second.cimg_addr;
+    }
+    return 0;
+}
+
 void FboManager::present_vi_origin(uint32_t vi_origin_phys, int win_w, int win_h, bool expand_aspect) {
     const FboEntry* entry = nullptr;
 
@@ -217,12 +237,6 @@ void FboManager::present_vi_origin(uint32_t vi_origin_phys, int win_w, int win_h
     gl::glBlitFramebuffer(0, 0, entry->width, entry->height,
                           dst_x, dst_y, dst_x + dst_w, dst_y + dst_h,
                           GL_COLOR_BUFFER_BIT, GL_LINEAR);
-    GLenum blit_err = gl::glGetError();
-    if (blit_err != GL_NO_ERROR) {
-        gl::glBlitFramebuffer(0, 0, entry->width, entry->height,
-                              dst_x, dst_y, dst_x + dst_w, dst_y + dst_h,
-                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    }
     gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
