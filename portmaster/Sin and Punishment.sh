@@ -23,29 +23,38 @@ if type get_controls >/dev/null 2>&1; then
   get_controls
 fi
 
+GAMEDIR="/$directory/ports/sinandpunishment"
+
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-if [ -n "${directory:-}" ] && [ -d "$directory/ports/sinandpunishment" ]; then
-  GAMEDIR="$directory/ports/sinandpunishment"
+if [ -d "$GAMEDIR" ]; then
+  SNP_RUNDIR="$GAMEDIR"
+elif [ -d "$SCRIPT_DIR/.ports/sinandpunishment" ]; then
+  SNP_RUNDIR="$SCRIPT_DIR/.ports/sinandpunishment"
 elif [ -d "$SCRIPT_DIR/sinandpunishment" ]; then
-  GAMEDIR="$SCRIPT_DIR/sinandpunishment"
+  SNP_RUNDIR="$SCRIPT_DIR/sinandpunishment"
 else
-  GAMEDIR="$SCRIPT_DIR"
+  SNP_RUNDIR="$GAMEDIR"
 fi
 
-cd "$GAMEDIR"
-> "$GAMEDIR/log.txt" 2>&1
+if [ ! -d "$SNP_RUNDIR" ]; then
+  echo "Error: Game directory not found at $GAMEDIR or $SCRIPT_DIR/.ports/sinandpunishment"
+  exit 1
+fi
 
-export LD_LIBRARY_PATH="$GAMEDIR/lib:${LD_LIBRARY_PATH:-}"
+cd "$SNP_RUNDIR" || exit 1
+: > "$SNP_RUNDIR/log.txt"
+
+export LD_LIBRARY_PATH="$SNP_RUNDIR/lib:${LD_LIBRARY_PATH:-}"
 export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG:-}"
 if [ -z "${SDL_GAMECONTROLLERCONFIG_FILE:-}" ] && [ -f "${controlfolder}/gamecontrollerdb.txt" ]; then
   export SDL_GAMECONTROLLERCONFIG_FILE="${controlfolder}/gamecontrollerdb.txt"
 fi
-export SNP_ROM_DIR="$GAMEDIR/roms"
+export SNP_ROM_DIR="$SNP_RUNDIR/roms"
 
 # Locate valid Sin and Punishment ROM
 ROM_FOUND=""
-for candidate in "$GAMEDIR/roms"/*.[zZ]64 "$GAMEDIR/roms"/*.[nN]64 "$GAMEDIR/roms"/*.[vV]64 \
-                 "$GAMEDIR"/*.[zZ]64 "$GAMEDIR"/*.[nN]64 "$GAMEDIR"/*.[vV]64; do
+for candidate in "$SNP_RUNDIR/roms"/*.[zZ]64 "$SNP_RUNDIR/roms"/*.[nN]64 "$SNP_RUNDIR/roms"/*.[vV]64 \
+                 "$SNP_RUNDIR"/*.[zZ]64 "$SNP_RUNDIR"/*.[nN]64 "$SNP_RUNDIR"/*.[vV]64; do
   if [ -f "$candidate" ]; then
     ROM_FOUND="$candidate"
     break
@@ -53,27 +62,27 @@ for candidate in "$GAMEDIR/roms"/*.[zZ]64 "$GAMEDIR/roms"/*.[nN]64 "$GAMEDIR/rom
 done
 
 if [ -z "$ROM_FOUND" ]; then
-  echo "No Sin and Punishment ROM found in $GAMEDIR/roms/ or $GAMEDIR/" >> "$GAMEDIR/log.txt"
-  echo "Place a Sin and Punishment ROM (.z64, .n64, or .v64) in sinandpunishment/roms/" >> "$GAMEDIR/log.txt"
+  echo "No Sin and Punishment ROM found in $SNP_RUNDIR/roms/ or $SNP_RUNDIR/" | tee -a "$SNP_RUNDIR/log.txt"
+  echo "Place a Sin and Punishment ROM (.z64, .n64, or .v64) in sinandpunishment/roms/" | tee -a "$SNP_RUNDIR/log.txt"
   if type text_viewer >/dev/null 2>&1; then
-    text_viewer -f 24 -m "No Sin and Punishment ROM found!\n\nPlease place your .z64 ROM inside:\nports/sinandpunishment/roms/" -t 5
+    text_viewer -f 24 -m "No Sin and Punishment ROM found!\n\nPlease place your .z64 ROM inside:\nsinandpunishment/roms/" -t 5
   fi
   exit 1
 fi
 
-echo "Found ROM: $ROM_FOUND" >> "$GAMEDIR/log.txt"
+echo "Found ROM: $ROM_FOUND" | tee -a "$SNP_RUNDIR/log.txt"
 
 if [ -n "${ESUDO:-}" ]; then
-  $ESUDO chmod +x "$GAMEDIR/SnPRecompiled"
+  $ESUDO chmod +x "$SNP_RUNDIR/SnPRecompiled"
 else
-  chmod +x "$GAMEDIR/SnPRecompiled"
+  chmod +x "$SNP_RUNDIR/SnPRecompiled"
 fi
 
 if type pm_platform_helper >/dev/null 2>&1; then
-  pm_platform_helper "$GAMEDIR/SnPRecompiled"
+  pm_platform_helper "$SNP_RUNDIR/SnPRecompiled"
 fi
 
-./SnPRecompiled >> "$GAMEDIR/log.txt" 2>&1
+./SnPRecompiled 2>&1 | tee -a "$SNP_RUNDIR/log.txt"
 
 if type pm_finish >/dev/null 2>&1; then
   pm_finish

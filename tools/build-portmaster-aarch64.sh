@@ -161,22 +161,25 @@ with zipfile.ZipFile(dist_zip, 'w', zipfile.ZIP_DEFLATED) as z:
 "
 cd "$REPO_ROOT"
 
-# Update dist/rgsp-ready directory
+# Update dist/rgsp-ready directory (uses NextUI PORTS.pak .ports/ layout)
 echo "--> Updating dist/rgsp-ready handheld directory..."
-mkdir -p "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/saves"
-mkdir -p "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/roms"
+RGSP_PORT_DIR="$REPO_ROOT/dist/rgsp-ready/.ports/sinandpunishment"
+mkdir -p "$RGSP_PORT_DIR/saves"
+mkdir -p "$RGSP_PORT_DIR/roms"
 cp -f "$REPO_ROOT/portmaster/Sin and Punishment.sh" "$REPO_ROOT/dist/rgsp-ready/"
-cp -f "$REPO_ROOT/portmaster/sinandpunishment/snprecomp.toml" "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/"
-cp -f "$REPO_ROOT/portmaster/sinandpunishment/port.json" "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/"
-cp -f "$REPO_ROOT/portmaster/sinandpunishment/README.md" "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/"
-cp -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/SnPRecompiled"
-touch "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/saves/.gitkeep"
-touch "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/roms/.gitkeep"
-for rom in "$REPO_ROOT/portmaster/sinandpunishment/roms"/*.[zZnNvV]64; do
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/snprecomp.toml" "$RGSP_PORT_DIR/"
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/port.json" "$RGSP_PORT_DIR/"
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/README.md" "$RGSP_PORT_DIR/"
+cp -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" "$RGSP_PORT_DIR/SnPRecompiled"
+touch "$RGSP_PORT_DIR/saves/.gitkeep"
+touch "$RGSP_PORT_DIR/roms/.gitkeep"
+for rom in "$REPO_ROOT/portmaster/sinandpunishment/roms"/*.[zZnNvV]64 \
+           "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/roms"/*.[zZnNvV]64; do
     if [ -f "$rom" ]; then
-        cp -u "$rom" "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/roms/"
+        cp -u "$rom" "$RGSP_PORT_DIR/roms/"
     fi
 done
+rm -rf "$REPO_ROOT/dist/rgsp-ready/sinandpunishment"
 
 echo "=== Build Complete! ==="
 echo "Output package: $DIST_ZIP"

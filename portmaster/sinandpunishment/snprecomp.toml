@@ -23,9 +23,9 @@ sfx_volume = 100
 #   "twin_stick"   - Dual-Stick Handhelds: Left stick strafes, Right stick aims, D-Pad C-buttons, R1/R2 fire, L1/L2 jump, X roll, A lock-on
 scheme = "dpad_aim"
 # Face button layout:
-#   "nintendo"   - Physical East=A, South=B, North=X, West=Y (default for RG34XX SP / Nintendo layouts)
-#   "positional" - Swapped A<->B, X<->Y (for Xbox-positional gamepads)
-face_layout = "nintendo"
+#   "positional" - Maps SDL East(B)->A, South(A)->B, North(Y)->X, West(X)->Y (matches NextUI PORTS.pak default xbox controllerDB)
+#   "nintendo"   - Direct SDL A->A, B->B, X->X, Y->Y (use if PORTS-portmaster/nintendo swap is enabled)
+face_layout = "positional"
 stick_sensitivity = 100.0
 deadzone = 0.15
 analog_aim = true
