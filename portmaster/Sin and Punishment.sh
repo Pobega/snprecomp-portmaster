@@ -37,6 +37,9 @@ cd "$GAMEDIR"
 
 export LD_LIBRARY_PATH="$GAMEDIR/lib:${LD_LIBRARY_PATH:-}"
 export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG:-}"
+if [ -z "${SDL_GAMECONTROLLERCONFIG_FILE:-}" ] && [ -f "${controlfolder}/gamecontrollerdb.txt" ]; then
+  export SDL_GAMECONTROLLERCONFIG_FILE="${controlfolder}/gamecontrollerdb.txt"
+fi
 export SNP_ROM_DIR="$GAMEDIR/roms"
 
 # Locate valid Sin and Punishment ROM

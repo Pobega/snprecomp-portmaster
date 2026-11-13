@@ -18,6 +18,7 @@
 
 #include "handheld_config.h"
 #include "handheld_input.h"
+#include "handheld_overlay.h"
 #include "rom_loader.h"
 
 #include "librecomp/game.hpp"
@@ -320,6 +321,7 @@ std::vector<recomp::GameEntry> supported_games = {
 int main(int argc, char** argv) {
     snp::handheld::load_config();
     snp::handheld::apply_graphics_config();
+    snp::handheld::init_overlay();
 
     recomp::Version project_version{};
     if (!recomp::Version::from_string(VERSION_STRING, project_version)) {
@@ -370,6 +372,7 @@ int main(int argc, char** argv) {
 
     ultramodern::renderer::callbacks_t renderer_callbacks{
         .create_render_context = [](uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
+            snp::gles3::set_overlay_render_callback(snp::handheld::render_overlay);
             return snp::gles3::create_renderer_context(rdram, window_handle, developer_mode);
         },
     };
@@ -426,6 +429,7 @@ int main(int argc, char** argv) {
         .message_queue_control = {},
     });
 
+    snp::handheld::shutdown_overlay();
     snp::handheld::shutdown_input();
     fflush(stdout);
     fflush(stderr);

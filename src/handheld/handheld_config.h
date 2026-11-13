@@ -10,8 +10,11 @@ namespace snp::handheld {
 constexpr const char* DEFAULT_CONFIG_FILE = "snprecomp.toml";
 constexpr const char* ASPECT_RATIO_EXPAND = "expand";
 constexpr const char* ASPECT_RATIO_ORIGINAL = "original";
-constexpr const char* CONTROL_SCHEME_TWIN_STICK = "twin_stick";
 constexpr const char* CONTROL_SCHEME_DPAD_AIM = "dpad_aim";
+constexpr const char* CONTROL_SCHEME_DPAD_STRAFE = "dpad_strafe";
+constexpr const char* CONTROL_SCHEME_TWIN_STICK = "twin_stick";
+constexpr const char* FACE_LAYOUT_NINTENDO = "nintendo";
+constexpr const char* FACE_LAYOUT_POSITIONAL = "positional";
 constexpr const char* ROM_PREFERRED_AUTO = "auto";
 constexpr const char* ROM_PREFERRED_EN = "en";
 constexpr const char* ROM_PREFERRED_JP = "jp";
@@ -38,7 +41,8 @@ struct AudioSettings {
 };
 
 struct ControlsSettings {
-    std::string scheme = CONTROL_SCHEME_TWIN_STICK;
+    std::string scheme = CONTROL_SCHEME_DPAD_AIM;
+    std::string face_layout = FACE_LAYOUT_NINTENDO;
     float stick_sensitivity = DEFAULT_STICK_SENSITIVITY;
     float deadzone = DEFAULT_DEADZONE;
     bool analog_aim = true;

@@ -64,8 +64,10 @@ void save_config(const std::string& config_path) {
         << "music_volume = " << g_config.audio.music_volume << "\n"
         << "sfx_volume = " << g_config.audio.sfx_volume << "\n\n"
         << "[controls]\n"
-        << "# Scheme: \"twin_stick\" (Left Stick strafes, Right Stick aims) or \"dpad_aim\"\n"
+        << "# Scheme: \"dpad_aim\" (RGSP stickless default), \"dpad_strafe\", or \"twin_stick\"\n"
         << "scheme = \"" << g_config.controls.scheme << "\"\n"
+        << "# Face layout: \"nintendo\" (East A, South B, North X, West Y) or \"positional\" (swapped A<->B, X<->Y)\n"
+        << "face_layout = \"" << g_config.controls.face_layout << "\"\n"
         << "stick_sensitivity = " << g_config.controls.stick_sensitivity << "\n"
         << "deadzone = " << g_config.controls.deadzone << "\n"
         << "analog_aim = " << (g_config.controls.analog_aim ? "true" : "false") << "\n"
@@ -109,7 +111,8 @@ bool load_config(const std::string& config_path) {
         }
 
         if (auto controls = tbl["controls"].as_table()) {
-            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_TWIN_STICK);
+            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_DPAD_AIM);
+            g_config.controls.face_layout = controls->get("face_layout")->value_or(FACE_LAYOUT_NINTENDO);
             g_config.controls.stick_sensitivity = static_cast<float>(controls->get("stick_sensitivity")->value_or(double(DEFAULT_STICK_SENSITIVITY)));
             g_config.controls.deadzone = static_cast<float>(controls->get("deadzone")->value_or(double(DEFAULT_DEADZONE)));
             g_config.controls.analog_aim = controls->get("analog_aim")->value_or(true);

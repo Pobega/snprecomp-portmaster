@@ -51,6 +51,9 @@ vcpkg_installed/
 # Runtime files
 imgui.ini
 rt64.log
+mods.json
+/snprecomp.toml
+/saves/
 
 node_modules/
 

@@ -62,4 +62,7 @@ private:
 std::unique_ptr<ultramodern::renderer::RendererContext> create_renderer_context(
     uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode);
 
+using OverlayRenderCallback = void (*)(int win_w, int win_h);
+void set_overlay_render_callback(OverlayRenderCallback callback);
+
 } // namespace snp::gles3

@@ -8,6 +8,14 @@
 
 namespace snp::gles3 {
 
+namespace {
+OverlayRenderCallback s_overlay_render_callback = nullptr;
+} // namespace
+
+void set_overlay_render_callback(OverlayRenderCallback callback) {
+    s_overlay_render_callback = callback;
+}
+
 Gles3RendererContext::Gles3RendererContext(uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode)
     : rdram_(rdram), window_handle_(window_handle), developer_mode_(developer_mode) {
     setup_result = ultramodern::renderer::SetupResult::GraphicsAPINotFound;
@@ -30,6 +38,15 @@ Gles3RendererContext::Gles3RendererContext(uint8_t* rdram, ultramodern::renderer
     const char* quit_env = std::getenv("SNP_AUTO_QUIT_DLS");
     if (quit_env) {
         auto_quit_dls_ = std::stoll(quit_env);
+    }
+    const char* dump_single = std::getenv("SNP_DUMP_SCREEN_PPM");
+    if (dump_single) {
+        try {
+            uint64_t f = std::stoull(dump_single);
+            dump_frames_.push_back(f > 0 ? f : 1);
+        } catch (...) {
+            dump_frames_.push_back(1);
+        }
     }
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -505,6 +522,10 @@ void Gles3RendererContext::dump_frame_ppm(uint64_t frame_num) {
 void Gles3RendererContext::update_screen() {
     uint32_t vi_origin = ultramodern::renderer::get_vi_regs()->VI_ORIGIN_REG;
     fbo_manager_->present_vi_origin(physical_rdram_offset(vi_origin), win_w_, win_h_, expand_aspect_);
+
+    if (s_overlay_render_callback != nullptr) {
+        s_overlay_render_callback(win_w_, win_h_);
+    }
 
     if (dl_count_ > 0 && dl_count_ != last_dumped_dl_) {
         bool should_dump = false;

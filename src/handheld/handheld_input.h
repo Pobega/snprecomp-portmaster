@@ -12,4 +12,6 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y);
 void set_rumble(int controller_num, bool rumble);
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num);
 
+bool is_gameplay_reticle_active();
+
 } // namespace snp::handheld
