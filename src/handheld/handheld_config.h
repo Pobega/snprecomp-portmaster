@@ -10,9 +10,20 @@ namespace snp::handheld {
 constexpr const char* DEFAULT_CONFIG_FILE = "snprecomp.toml";
 constexpr const char* ASPECT_RATIO_EXPAND = "expand";
 constexpr const char* ASPECT_RATIO_ORIGINAL = "original";
+constexpr const char* CONTROL_SCHEME_BUMPER_STRAFE = "bumper_strafe";
+constexpr const char* CONTROL_SCHEME_FACE_STRAFE = "face_strafe";
+constexpr const char* CONTROL_SCHEME_DPAD_STRAFE_SHIFT = "dpad_strafe_shift";
 constexpr const char* CONTROL_SCHEME_DPAD_AIM = "dpad_aim";
 constexpr const char* CONTROL_SCHEME_DPAD_STRAFE = "dpad_strafe";
 constexpr const char* CONTROL_SCHEME_TWIN_STICK = "twin_stick";
+
+constexpr const char* SMART_LOCK_HOLD = "hold";
+constexpr const char* SMART_LOCK_AUTO = "auto";
+constexpr const char* SMART_LOCK_OFF = "off";
+
+constexpr const char* AIM_CURVE_S_CURVE = "s_curve";
+constexpr const char* AIM_CURVE_LINEAR = "linear";
+
 constexpr const char* FACE_LAYOUT_NINTENDO = "nintendo";
 constexpr const char* FACE_LAYOUT_POSITIONAL = "positional";
 constexpr const char* ROM_PREFERRED_AUTO = "auto";
@@ -41,7 +52,9 @@ struct AudioSettings {
 };
 
 struct ControlsSettings {
-    std::string scheme = CONTROL_SCHEME_DPAD_AIM;
+    std::string scheme = CONTROL_SCHEME_BUMPER_STRAFE;
+    std::string smart_lock_on = SMART_LOCK_HOLD;
+    std::string aim_curve = AIM_CURVE_S_CURVE;
     std::string face_layout = FACE_LAYOUT_NINTENDO;
     float stick_sensitivity = DEFAULT_STICK_SENSITIVITY;
     float deadzone = DEFAULT_DEADZONE;

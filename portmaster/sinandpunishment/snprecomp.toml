@@ -18,10 +18,17 @@ sfx_volume = 100
 
 [controls]
 # Scheme:
-#   "dpad_aim"     - RGSP Stickless Default: D-Pad aims crosshair, Y/A strafe left/right, R1/R2 fire, L1 jump, B/L2 roll, X lock-on
-#   "dpad_strafe"  - Stickless Alt: D-Pad strafes left/right, Face diamond (X/B/Y/A) aims crosshair, R1 fire, L1 jump, L2 roll, R2 lock-on
-#   "twin_stick"   - Dual-Stick Handhelds: Left stick strafes, Right stick aims, D-Pad C-buttons, R1/R2 fire, L1/L2 jump, X roll, A lock-on
-scheme = "dpad_aim"
+#   "bumper_strafe"      - RGSP Stickless Default: D-Pad aims, L1/R1 strafe, A/Y/R2 fire/sword, B jump, X/L2 lock-on
+#   "face_strafe"        - Stickless Alt: D-Pad aims, Y/B strafe, A roll, R1/R2 fire, L1/X jump, L2 lock-on
+#   "dpad_strafe_shift"  - Stickless Shift: D-Pad strafes, Hold L1/L2 + D-Pad aims (X recenters/switches), A/R1/R2 fire, B jump, Y roll
+#   "dpad_aim"           - Legacy D-Pad Aim: D-Pad aims, Y/A strafe, R1/R2 fire, L1 jump, B/L2 roll, X lock-on
+#   "dpad_strafe"        - Legacy Face Aim: D-Pad strafes, Face diamond (X/B/Y/A) aims, R1 fire, L1 jump, L2 roll, R2 lock-on
+#   "twin_stick"         - Dual-Stick Handhelds: Left stick strafes, Right stick aims, R1/R2 fire, L1/L2 jump, X roll, A lock-on
+scheme = "bumper_strafe"
+# Smart Lock-On: "hold" (default: hold button to lock), "auto" (always lock, hold to manual aim), "off" (N64 toggle)
+smart_lock_on = "hold"
+# Aim Curve: "s_curve" (fine tap precision + smooth ramp), "linear"
+aim_curve = "s_curve"
 # Face button layout:
 #   "positional" - Maps SDL East(B)->A, South(A)->B, North(Y)->X, West(X)->Y (matches NextUI PORTS.pak default xbox controllerDB)
 #   "nintendo"   - Direct SDL A->A, B->B, X->X, Y->Y (use if PORTS-portmaster/nintendo swap is enabled)

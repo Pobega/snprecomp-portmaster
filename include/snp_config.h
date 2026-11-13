@@ -35,6 +35,7 @@ namespace snp::config {
     MouseAim get_mouse_aim();
     float get_mouse_sensitivity(); // percent, for Relative
     float get_stick_sensitivity(); // percent, 100 the game's own speed
+    void set_stick_sensitivity(float sensitivity);
 
     // Screen Filter and Bloom at the end of the Graphics tab (RT64's
     // ScreenFilter and Bloom values; src/main/extras_config.cpp).

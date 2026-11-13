@@ -23,7 +23,7 @@ namespace gl = snp::gles3::gl;
 
 namespace {
 
-constexpr int TOTAL_MENU_ROWS = 11;
+constexpr int TOTAL_MENU_ROWS = 13;
 constexpr float FONT_CHAR_WIDTH = 8.0f;
 constexpr float FONT_CHAR_HEIGHT = 8.0f;
 constexpr float SOLID_UV_U = 127.5f / 128.0f;
@@ -31,9 +31,11 @@ constexpr float SOLID_UV_V = 63.5f / 64.0f;
 
 enum class MenuRow {
     ControlScheme = 0,
-    SwapSticks,
-    FaceButtons,
+    SmartLockOn,
+    AimCurve,
     AimSpeed,
+    FaceButtons,
+    SwapSticks,
     AspectRatio,
     Resolution,
     VSync,
@@ -307,9 +309,11 @@ void init_gl_resources() {
 std::string get_row_label(MenuRow row) {
     switch (row) {
     case MenuRow::ControlScheme: return "Control Scheme";
-    case MenuRow::SwapSticks: return "Swap Sticks";
-    case MenuRow::FaceButtons: return "Face Buttons";
+    case MenuRow::SmartLockOn: return "Smart Lock-On";
+    case MenuRow::AimCurve: return "Aim Curve";
     case MenuRow::AimSpeed: return "Aim Speed";
+    case MenuRow::FaceButtons: return "Face Buttons";
+    case MenuRow::SwapSticks: return "Swap Sticks";
     case MenuRow::AspectRatio: return "Aspect Ratio";
     case MenuRow::Resolution: return "Resolution";
     case MenuRow::VSync: return "VSync";
@@ -324,15 +328,25 @@ std::string get_row_label(MenuRow row) {
 std::string get_row_value(MenuRow row, const HandheldConfig& cfg) {
     switch (row) {
     case MenuRow::ControlScheme:
-        if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_AIM) return "RGSP: D-Pad Aim";
-        if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE) return "RGSP: D-Pad Strafe";
+        if (cfg.controls.scheme == CONTROL_SCHEME_BUMPER_STRAFE) return "RGSP: Bumper Strafe";
+        if (cfg.controls.scheme == CONTROL_SCHEME_FACE_STRAFE) return "RGSP: Face Strafe";
+        if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) return "RGSP: Strafe + Shift";
+        if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_AIM) return "Legacy: D-Pad Aim";
+        if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE) return "Legacy: Face Aim";
         return "Twin Stick";
-    case MenuRow::SwapSticks:
-        return cfg.controls.swap_sticks ? "On" : "Off";
-    case MenuRow::FaceButtons:
-        return (cfg.controls.face_layout == FACE_LAYOUT_POSITIONAL) ? "Positional (Swap)" : "Nintendo (B/A/Y/X)";
+    case MenuRow::SmartLockOn:
+        if (cfg.controls.smart_lock_on == SMART_LOCK_AUTO) return "Auto (Hold=Manual)";
+        if (cfg.controls.smart_lock_on == SMART_LOCK_OFF) return "Off (N64 Toggle)";
+        return "Hold (Manual Default)";
+    case MenuRow::AimCurve:
+        if (cfg.controls.aim_curve == AIM_CURVE_LINEAR) return "Linear";
+        return "S-Curve (Precision)";
     case MenuRow::AimSpeed:
         return std::to_string(static_cast<int>(std::round(cfg.controls.stick_sensitivity))) + "%";
+    case MenuRow::FaceButtons:
+        return (cfg.controls.face_layout == FACE_LAYOUT_POSITIONAL) ? "Positional (Swap)" : "Nintendo (B/A/Y/X)";
+    case MenuRow::SwapSticks:
+        return cfg.controls.swap_sticks ? "On" : "Off";
     case MenuRow::AspectRatio:
         return (cfg.video.aspect_ratio == ASPECT_RATIO_EXPAND) ? "3:2 Expand" : "4:3 Original";
     case MenuRow::Resolution:
@@ -354,29 +368,49 @@ void cycle_row_value(MenuRow row, bool forward) {
     auto& cfg = get_mutable_config();
     switch (row) {
     case MenuRow::ControlScheme: {
-        const std::array<std::string, 3> schemes = {
+        const std::array<std::string, 6> schemes = {
+            CONTROL_SCHEME_BUMPER_STRAFE,
+            CONTROL_SCHEME_FACE_STRAFE,
+            CONTROL_SCHEME_DPAD_STRAFE_SHIFT,
             CONTROL_SCHEME_DPAD_AIM,
             CONTROL_SCHEME_DPAD_STRAFE,
             CONTROL_SCHEME_TWIN_STICK,
         };
         auto it = std::find(schemes.begin(), schemes.end(), cfg.controls.scheme);
         int idx = (it != schemes.end()) ? static_cast<int>(std::distance(schemes.begin(), it)) : 0;
-        idx = forward ? (idx + 1) % 3 : (idx + 2) % 3;
+        idx = forward ? (idx + 1) % 6 : (idx + 5) % 6;
         cfg.controls.scheme = schemes[idx];
         break;
     }
-    case MenuRow::SwapSticks:
-        cfg.controls.swap_sticks = !cfg.controls.swap_sticks;
+    case MenuRow::SmartLockOn: {
+        const std::array<std::string, 3> modes = {
+            SMART_LOCK_HOLD,
+            SMART_LOCK_AUTO,
+            SMART_LOCK_OFF,
+        };
+        auto it = std::find(modes.begin(), modes.end(), cfg.controls.smart_lock_on);
+        int idx = (it != modes.end()) ? static_cast<int>(std::distance(modes.begin(), it)) : 0;
+        idx = forward ? (idx + 1) % 3 : (idx + 2) % 3;
+        cfg.controls.smart_lock_on = modes[idx];
         break;
+    }
+    case MenuRow::AimCurve:
+        cfg.controls.aim_curve = (cfg.controls.aim_curve == AIM_CURVE_S_CURVE)
+            ? AIM_CURVE_LINEAR : AIM_CURVE_S_CURVE;
+        break;
+    case MenuRow::AimSpeed: {
+        float delta = forward ? 10.0f : -10.0f;
+        cfg.controls.stick_sensitivity = std::clamp(cfg.controls.stick_sensitivity + delta, 50.0f, 200.0f);
+        snp::config::set_stick_sensitivity(cfg.controls.stick_sensitivity);
+        break;
+    }
     case MenuRow::FaceButtons:
         cfg.controls.face_layout = (cfg.controls.face_layout == FACE_LAYOUT_NINTENDO)
             ? FACE_LAYOUT_POSITIONAL : FACE_LAYOUT_NINTENDO;
         break;
-    case MenuRow::AimSpeed: {
-        float delta = forward ? 10.0f : -10.0f;
-        cfg.controls.stick_sensitivity = std::clamp(cfg.controls.stick_sensitivity + delta, 50.0f, 150.0f);
+    case MenuRow::SwapSticks:
+        cfg.controls.swap_sticks = !cfg.controls.swap_sticks;
         break;
-    }
     case MenuRow::AspectRatio:
         cfg.video.aspect_ratio = (cfg.video.aspect_ratio == ASPECT_RATIO_EXPAND)
             ? ASPECT_RATIO_ORIGINAL : ASPECT_RATIO_EXPAND;
@@ -412,12 +446,10 @@ void cycle_row_value(MenuRow row, bool forward) {
 void build_overlay_mesh(int win_w, int win_h) {
     const auto& cfg = get_config();
 
-    // Translucent full screen backdrop
     add_solid_rect(0.0f, 0.0f, static_cast<float>(win_w), static_cast<float>(win_h), COLOR_BACKDROP);
 
-    // Centered menu panel
-    float panel_w = 600.0f;
-    float panel_h = 410.0f;
+    float panel_w = 648.0f;
+    float panel_h = 444.0f;
     float panel_x0 = (static_cast<float>(win_w) - panel_w) * 0.5f;
     float panel_y0 = (static_cast<float>(win_h) - panel_h) * 0.5f;
     float panel_x1 = panel_x0 + panel_w;
@@ -426,23 +458,21 @@ void build_overlay_mesh(int win_w, int win_h) {
     add_solid_rect(panel_x0, panel_y0, panel_x1, panel_y1, COLOR_PANEL_BG);
     add_outline_rect(panel_x0 - 2.0f, panel_y0 - 2.0f, panel_x1 + 2.0f, panel_y1 + 2.0f, 2.0f, COLOR_PANEL_BORDER);
 
-    // Title text
     const std::string title = "SIN AND PUNISHMENT - QUICK SETTINGS";
-    float title_scale = 1.5f;
+    float title_scale = 1.4f;
     float title_w = title.size() * FONT_CHAR_WIDTH * title_scale;
     float title_x = panel_x0 + (panel_w - title_w) * 0.5f;
-    float title_y = panel_y0 + 12.0f;
+    float title_y = panel_y0 + 10.0f;
     add_string(title_x, title_y, title_scale, title, COLOR_GOLD);
 
-    float sep_y = title_y + 18.0f;
+    float sep_y = title_y + 15.0f;
     add_solid_rect(panel_x0 + 16.0f, sep_y, panel_x1 - 16.0f, sep_y + 1.0f, COLOR_SEPARATOR);
 
-    // Menu rows
-    float row_start_y = sep_y + 8.0f;
+    float row_start_y = sep_y + 6.0f;
     float row_height = 18.0f;
     float label_x = panel_x0 + 36.0f;
-    float value_x = panel_x0 + 290.0f;
-    float text_scale = 1.35f;
+    float value_x = panel_x0 + 260.0f;
+    float text_scale = 1.25f;
 
     for (int i = 0; i < TOTAL_MENU_ROWS; ++i) {
         MenuRow row = static_cast<MenuRow>(i);
@@ -471,41 +501,52 @@ void build_overlay_mesh(int win_w, int win_h) {
         }
     }
 
-    // Active Controls Legend Box
     float legend_box_y0 = row_start_y + TOTAL_MENU_ROWS * row_height + 6.0f;
-    float legend_box_y1 = legend_box_y0 + 56.0f;
+    float legend_box_y1 = legend_box_y0 + 64.0f;
     float box_x0 = panel_x0 + 16.0f;
     float box_x1 = panel_x1 - 16.0f;
 
     add_solid_rect(box_x0, legend_box_y0, box_x1, legend_box_y1, COLOR_BOX_BG);
     add_outline_rect(box_x0, legend_box_y0, box_x1, legend_box_y1, 1.0f, COLOR_SEPARATOR);
 
+    std::string lock_desc = (cfg.controls.smart_lock_on == SMART_LOCK_AUTO)
+        ? "Auto"
+        : ((cfg.controls.smart_lock_on == SMART_LOCK_OFF) ? "Toggle" : "Hold");
+
     std::string legend_l1;
     std::string legend_l2;
-    if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_AIM) {
-        legend_l1 = "Aim: D-Pad | Strafe: Y/A | Fire: R1/R2 | Jump: L1";
-        legend_l2 = "Roll: B/L2 | Lock-On: X | Pause: Start";
+    if (cfg.controls.scheme == CONTROL_SCHEME_BUMPER_STRAFE) {
+        legend_l1 = "Aim: D-Pad | Strafe/2xRoll: L1/R1 | Fire: A/Y/R2 | Jump: B";
+        legend_l2 = "Lock-On: X/L2 (" + lock_desc + ") | Pause: Start";
+    } else if (cfg.controls.scheme == CONTROL_SCHEME_FACE_STRAFE) {
+        legend_l1 = "Aim: D-Pad | Strafe/2xRoll: Y(L) B(R) | Roll: A";
+        legend_l2 = "Fire: R1/R2 | Jump: L1/X | Lock-On: L2 (" + lock_desc + ") | Start: Pause";
+    } else if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) {
+        legend_l1 = "Move/2xRoll: D-Pad L/R | Hold L1/L2+D-Pad: Manual Aim";
+        legend_l2 = "Fire: A/R1/R2 | Jump: B | Roll: Y | Next/Center: X";
+    } else if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_AIM) {
+        legend_l1 = "Aim: D-Pad | Strafe: Y(L) A(R) | Fire: R1/R2 | Jump: L1";
+        legend_l2 = "Roll: B/L2 | Lock-On: X (" + lock_desc + ") | Pause: Start";
     } else if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE) {
         legend_l1 = "Aim: Diamond(X/B/Y/A) | Strafe: D-Pad L/R";
-        legend_l2 = "Fire: R1 | Jump: L1 | Roll: L2 | Lock-On: R2";
+        legend_l2 = "Fire: R1 | Jump: L1 | Roll: L2 | Lock-On: R2 (" + lock_desc + ")";
     } else {
         if (cfg.controls.swap_sticks) {
             legend_l1 = "Aim: Left Stick | Move: Right Stick | Fire: R1/R2";
         } else {
             legend_l1 = "Aim: Right Stick | Move: Left Stick | Fire: R1/R2";
         }
-        legend_l2 = "Jump: L1/L2 | Roll: X | Lock-On: A | Pause: Start";
+        legend_l2 = "Jump: L1/L2 | Roll: X | Lock-On: A (" + lock_desc + ") | Start: Pause";
     }
 
-    add_string(box_x0 + 10.0f, legend_box_y0 + 6.0f, 1.0f, "ACTIVE CONTROLS (" + get_row_value(MenuRow::ControlScheme, cfg) + "):", COLOR_GOLD);
-    add_string(box_x0 + 10.0f, legend_box_y0 + 22.0f, 1.15f, legend_l1, COLOR_WHITE);
-    add_string(box_x0 + 10.0f, legend_box_y0 + 38.0f, 1.15f, legend_l2, COLOR_WHITE);
+    add_string(box_x0 + 10.0f, legend_box_y0 + 5.0f, 1.0f, "ACTIVE CONTROLS (" + get_row_value(MenuRow::ControlScheme, cfg) + "):", COLOR_GOLD);
+    add_string(box_x0 + 10.0f, legend_box_y0 + 22.0f, 1.1f, legend_l1, COLOR_WHITE);
+    add_string(box_x0 + 10.0f, legend_box_y0 + 40.0f, 1.1f, legend_l2, COLOR_WHITE);
 
-    // Footer Hint
     const std::string footer = "D-Pad: Select/Change | A: Select | Select or Menu: Save & Close";
     float footer_w = footer.size() * FONT_CHAR_WIDTH * 1.0f;
     float footer_x = panel_x0 + (panel_w - footer_w) * 0.5f;
-    float footer_y = panel_y1 - 18.0f;
+    float footer_y = panel_y1 - 16.0f;
     add_string(footer_x, footer_y, 1.0f, footer, COLOR_MUTED_HINT);
 }
 
