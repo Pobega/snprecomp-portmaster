@@ -80,6 +80,14 @@ Gles3RendererContext::Gles3RendererContext(uint8_t* rdram, ultramodern::renderer
         return;
     }
 
+    const char* gl_vendor = reinterpret_cast<const char*>(gl::glGetString(GL_VENDOR));
+    const char* gl_renderer = reinterpret_cast<const char*>(gl::glGetString(GL_RENDERER));
+    const char* gl_version = reinterpret_cast<const char*>(gl::glGetString(GL_VERSION));
+    std::fprintf(stderr, "[GLES3] GL_VENDOR=%s | GL_RENDERER=%s | GL_VERSION=%s\n",
+                 gl_vendor ? gl_vendor : "Unknown",
+                 gl_renderer ? gl_renderer : "Unknown",
+                 gl_version ? gl_version : "Unknown");
+
     SDL_GetWindowSize(window_handle_, &win_w_, &win_h_);
     if (win_w_ <= 0) win_w_ = 720;
     if (win_h_ <= 0) win_h_ = 480;
@@ -414,7 +422,7 @@ void Gles3RendererContext::execute_display_list(uint32_t start_phys_addr) {
 
             case G_FILLRECT: {
                 if (cimg_targets_zbuffer_) {
-                    rsp_state_->flush_batch();
+                    rsp_state_->submit_render_pass();
                     fbo_manager_->request_depth_clear();
                 } else {
                     uint32_t lrx = (w0 >> 12) & 0xFFFu;
@@ -461,13 +469,13 @@ void Gles3RendererContext::execute_display_list(uint32_t start_phys_addr) {
             }
 
             case G_SETZIMG: {
-                rsp_state_->flush_batch();
+                rsp_state_->submit_render_pass();
                 zimg_phys_addr_ = resolve_segment_address(w1, rsp_state_->get_segments());
                 break;
             }
 
             case G_SETCIMG: {
-                rsp_state_->flush_batch();
+                rsp_state_->submit_render_pass();
                 uint32_t phys_cimg = resolve_segment_address(w1, rsp_state_->get_segments());
                 if (phys_cimg == zimg_phys_addr_) {
                     cimg_targets_zbuffer_ = true;
@@ -510,7 +518,7 @@ void Gles3RendererContext::execute_display_list(uint32_t start_phys_addr) {
         }
     }
 
-    rsp_state_->flush_batch();
+    rsp_state_->submit_render_pass();
 }
 
 void Gles3RendererContext::dump_frame_ppm(uint64_t frame_num) {
@@ -554,13 +562,15 @@ void Gles3RendererContext::check_perf_telemetry(uint32_t now_ticks) {
         auto tex_stats = tmem_cache_ ? tmem_cache_->get_and_reset_stats() : TextureCacheStats{};
         uint32_t shader_count = shader_cache_ ? static_cast<uint32_t>(shader_cache_->shader_count()) : 0;
         double avg_dl_ms = (dls_in_second_ > 0) ? (total_dl_ms_ / static_cast<double>(dls_in_second_)) : 0.0;
+        double avg_sub_ms = (dls_in_second_ > 0) ? (rsp_stats.total_submit_ms / static_cast<double>(dls_in_second_)) : 0.0;
         double avg_swap_ms = (swaps_in_second_ > 0) ? (total_swap_ms_ / static_cast<double>(swaps_in_second_)) : 0.0;
 
         std::fprintf(stderr,
-                     "[PERF] dls=%u swaps=%u skip_vi=%u batches=%u tris=%u tex_fast=%u tex_hit=%u tex_upload=%u shaders=%u dl_ms(avg=%.2f max=%.2f) swap_ms(avg=%.2f max=%.2f)\n",
+                     "[PERF] dls=%u swaps=%u skip_vi=%u passes=%u batches=%u tris=%u tex_fast=%u tex_hit=%u tex_upload=%u shaders=%u dl_ms(avg=%.2f max=%.2f sub=%.2f) swap_ms(avg=%.2f max=%.2f)\n",
                      dls_in_second_,
                      swaps_in_second_,
                      skipped_vis_in_second_,
+                     rsp_stats.passes,
                      rsp_stats.batches,
                      rsp_stats.triangles,
                      tex_stats.fast_hits,
@@ -569,6 +579,7 @@ void Gles3RendererContext::check_perf_telemetry(uint32_t now_ticks) {
                      shader_count,
                      avg_dl_ms,
                      max_dl_ms_,
+                     avg_sub_ms,
                      avg_swap_ms,
                      max_swap_ms_);
         std::fflush(stderr);

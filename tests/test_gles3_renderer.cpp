@@ -359,6 +359,57 @@ int main() {
         std::printf("[Test] Streaming ring buffer multi-batch rendering verified\n");
     }
 
+    // Clear-then-draw and multi-batch pass submission ordering
+    {
+        snp::gles3::TmemTextureCache tmem;
+        snp::gles3::CombinerShaderCache shaders;
+        snp::gles3::FboManager fbos;
+        snp::gles3::RspState rsp(tmem, shaders, fbos);
+
+        fbos.bind_fbo(0x00200000u, 320, 240, rdram.data());
+
+        // 1. Draw something into batch with G_CC_SHADE
+        uint32_t comb_w0 = (0u << 20) | (31u << 15) | (0u << 12) | (7u << 9) | (0u << 5) | (31u << 0);
+        uint32_t comb_w1 = (0u << 28) | (0u << 24) | (0u << 21) | (7u << 18) | (4u << 15) | (0u << 12) | (0u << 9) | (4u << 6);
+        rsp.set_combine(comb_w0, comb_w1);
+        rsp.set_other_mode_h(10, 1, 0x00000000u); // G_CYC_1CYCLE
+        rsp.set_prim_color(0, 0xFF0000FFu); // Red
+        rsp.draw_fill_rect(0, 0, 100 * 4, 100 * 4); // open batch in pass_draws_
+
+        // 2. Full-screen clear should trigger submit_render_pass() first and then clear
+        rsp.set_other_mode_h(10, 1, 0x00300000u); // G_CYC_FILL
+        rsp.set_fill_color(0x00010001u); // Dark Blue 16-bit
+        rsp.draw_fill_rect(0, 0, 319 * 4, 239 * 4); // fast path glClear
+
+        // 3. Draw green rect over cleared buffer
+        rsp.set_other_mode_h(10, 1, 0x00000000u); // G_CYC_1CYCLE
+        rsp.set_prim_color(0, 0x00FF00FFu); // Green
+        rsp.draw_fill_rect(50 * 4, 50 * 4, 150 * 4, 150 * 4);
+
+        // 4. Submit pass before reading back pixels from FBO
+        rsp.submit_render_pass();
+
+        auto stats = rsp.get_and_reset_stats();
+        assert(stats.passes >= 2);
+        assert(stats.batches >= 2);
+
+        // Verify pixel inside green rect (100, 100) and outside green rect (10, 10)
+        snp::gles3::FboEntry* current_fbo = fbos.get_current_fbo();
+        assert(current_fbo != nullptr);
+        snp::gles3::gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, current_fbo->fbo_id);
+
+        uint8_t px[4]{};
+        snp::gles3::gl::glReadPixels(100, 140, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        assert(px[0] < 50 && px[1] > 180 && px[2] < 50);
+
+        snp::gles3::gl::glReadPixels(10, 10, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        assert(px[0] < 50);
+
+        snp::gles3::gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        std::printf("[Test] Clear-then-draw and multi-batch pass submission ordering verified (passes=%u, batches=%u)\n",
+                    stats.passes, stats.batches);
+    }
+
     renderer->shutdown();
     SDL_DestroyWindow(window);
     SDL_Quit();

@@ -94,15 +94,20 @@ public:
     void ex_set_rect_align(uint32_t origin, int32_t offset_x, int32_t offset_y);
 
     void flush_batch();
+    void submit_render_pass();
 
     struct RspStats {
+        uint32_t passes = 0;
         uint32_t batches = 0;
         uint32_t triangles = 0;
+        double total_submit_ms = 0.0;
     };
     RspStats get_and_reset_stats() {
-        RspStats s{ batch_count_, tri_count_ };
+        RspStats s{ pass_count_, batch_count_, tri_count_, total_submit_ms_ };
+        pass_count_ = 0;
         batch_count_ = 0;
         tri_count_ = 0;
+        total_submit_ms_ = 0.0;
         return s;
     }
 
@@ -111,16 +116,49 @@ public:
     void set_segment(uint32_t seg_index, uint32_t addr) { segments_[seg_index & 0x0F] = addr; }
 
 private:
-    static constexpr size_t STREAM_VBO_MAX_VERTICES = 16384;
-    static constexpr size_t STREAM_IBO_MAX_INDICES = 32768;
-    static constexpr size_t STREAM_VBO_SIZE_BYTES = STREAM_VBO_MAX_VERTICES * sizeof(BatchVertex);
-    static constexpr size_t STREAM_IBO_SIZE_BYTES = STREAM_IBO_MAX_INDICES * sizeof(uint16_t);
+    static constexpr size_t MAX_PASS_VERTICES = 32768;
+    static constexpr size_t MAX_PASS_DRAWS = 512;
+    static constexpr size_t PASS_RING_COUNT = 8;
+
+    struct PassBufferSlot {
+        GLuint vao = 0;
+        GLuint vbo = 0;
+        GLuint ibo = 0;
+    };
+
+    struct PassDrawCmd {
+        CombinerProgram prog;
+        Matrix4 proj{};
+        Matrix4 mv{};
+        float tex_scale_s = 1.0f;
+        float tex_scale_t = 1.0f;
+        float tex_offset_s = 0.0f;
+        float tex_offset_t = 0.0f;
+        float fog_mult = 0.0f;
+        float fog_offset = 0.0f;
+        float prim_color[4]{ 1.0f, 1.0f, 1.0f, 1.0f };
+        float prim_lod_frac = 0.0f;
+        float env_color[4]{ 0.0f, 0.0f, 0.0f, 1.0f };
+        float fog_color[4]{ 0.0f, 0.0f, 0.0f, 1.0f };
+        float blend_color[4]{ 0.0f, 0.0f, 0.0f, 1.0f };
+        float alpha_threshold = 0.5f;
+        GLuint tex0_id = 0;
+        GLuint tex1_id = 0;
+        uint32_t geometry_mode = 0;
+        uint32_t other_mode_h = 0;
+        uint32_t other_mode_l = 0;
+        ScissorRect scissor;
+        uint32_t first_index = 0;
+        uint32_t index_count = 0;
+    };
 
     Matrix4 read_matrix(const uint8_t* rdram, uint32_t phys_addr) const;
     void apply_lighting(RspVertex& v, float nx, float ny, float nz) const;
     float compute_rect_shift_x() const;
     void apply_gl_scissor(const FboEntry& fbo) const;
+    void apply_gl_scissor_for_rect(const FboEntry& fbo, const ScissorRect& scissor) const;
     void ensure_batch_state(GLuint tex_id, float tex_scale_s, float tex_scale_t, float tex_offset_s, float tex_offset_t);
+    void submit_render_pass_internal();
 
     TmemTextureCache& tmem_cache_;
     CombinerShaderCache& shader_cache_;
@@ -170,14 +208,9 @@ private:
     int32_t rect_align_offset_x_ = 0;
     int32_t rect_align_offset_y_ = 0;
 
-    // Batching resources
-    GLuint vao_ = 0;
-    GLuint vbo_ = 0;
-    GLuint ibo_ = 0;
-    size_t vbo_offset_bytes_ = 0;
-    size_t ibo_offset_bytes_ = 0;
-    uint32_t batch_count_ = 0;
-    uint32_t tri_count_ = 0;
+    // 8-slot idle pass ring and command recording
+    PassBufferSlot pass_ring_[PASS_RING_COUNT];
+    size_t ring_cursor_ = 0;
 
     std::vector<BatchVertex> batch_vertices_;
     std::vector<uint16_t> batch_indices_;
@@ -186,6 +219,15 @@ private:
     float current_tex_scale_t_ = 1.0f;
     float current_tex_offset_s_ = 0.0f;
     float current_tex_offset_t_ = 0.0f;
+
+    std::vector<BatchVertex> pass_vertices_;
+    std::vector<uint16_t> pass_indices_;
+    std::vector<PassDrawCmd> pass_draws_;
+
+    uint32_t pass_count_ = 0;
+    uint32_t batch_count_ = 0;
+    uint32_t tri_count_ = 0;
+    double total_submit_ms_ = 0.0;
 };
 
 } // namespace snp::gles3

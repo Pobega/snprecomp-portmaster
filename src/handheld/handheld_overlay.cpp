@@ -89,6 +89,9 @@ GLint s_loc_screen_size = -1;
 GLint s_loc_texture = -1;
 
 std::vector<OverlayVertex> s_vertices;
+bool s_mesh_dirty = true;
+int s_last_win_w = 0;
+int s_last_win_h = 0;
 
 void add_quad(float x0, float y0, float x1, float y1,
               float u0, float v0, float u1, float v1,
@@ -535,6 +538,8 @@ bool is_overlay_open() {
 }
 
 void open_overlay() {
+    std::lock_guard<std::mutex> lock(s_overlay_mutex);
+    s_mesh_dirty = true;
     s_overlay_open.store(true, std::memory_order_relaxed);
 }
 
@@ -543,11 +548,13 @@ void close_overlay() {
 }
 
 void toggle_overlay() {
+    std::lock_guard<std::mutex> lock(s_overlay_mutex);
     bool current = s_overlay_open.load(std::memory_order_relaxed);
     if (current) {
         save_config();
         s_overlay_open.store(false, std::memory_order_relaxed);
     } else {
+        s_mesh_dirty = true;
         s_overlay_open.store(true, std::memory_order_relaxed);
     }
 }
@@ -559,6 +566,10 @@ void update_overlay_input(bool up, bool down, bool left, bool right,
     }
 
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
+
+    if (up || down || left || right || btn_a) {
+        s_mesh_dirty = true;
+    }
 
     if (up) {
         s_selected_row = (s_selected_row + TOTAL_MENU_ROWS - 1) % TOTAL_MENU_ROWS;
@@ -607,8 +618,22 @@ void render_overlay(int win_w, int win_h) {
         return;
     }
 
-    s_vertices.clear();
-    build_overlay_mesh(win_w, win_h);
+    if (win_w != s_last_win_w || win_h != s_last_win_h) {
+        s_mesh_dirty = true;
+        s_last_win_w = win_w;
+        s_last_win_h = win_h;
+    }
+
+    if (s_mesh_dirty) {
+        s_vertices.clear();
+        build_overlay_mesh(win_w, win_h);
+        if (!s_vertices.empty()) {
+            gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+            gl::glBufferData(GL_ARRAY_BUFFER, s_vertices.size() * sizeof(OverlayVertex), s_vertices.data(), GL_STREAM_DRAW);
+        }
+        s_mesh_dirty = false;
+    }
+
     if (s_vertices.empty()) {
         return;
     }
@@ -631,9 +656,6 @@ void render_overlay(int win_w, int win_h) {
     gl::glBindTexture(GL_TEXTURE_2D, s_font_texture);
 
     gl::glBindVertexArray(s_vao);
-    gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
-    gl::glBufferData(GL_ARRAY_BUFFER, s_vertices.size() * sizeof(OverlayVertex), s_vertices.data(), GL_STREAM_DRAW);
-
     gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(s_vertices.size()));
 
     // Cleanup state

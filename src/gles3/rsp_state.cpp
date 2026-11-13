@@ -66,38 +66,45 @@ RspState::RspState(TmemTextureCache& tmem_cache, CombinerShaderCache& shader_cac
     : tmem_cache_(tmem_cache), shader_cache_(shader_cache), fbo_manager_(fbo_manager) {
     reset();
 
-    gl::glGenVertexArrays(1, &vao_);
-    gl::glGenBuffers(1, &vbo_);
-    gl::glGenBuffers(1, &ibo_);
+    for (size_t i = 0; i < PASS_RING_COUNT; ++i) {
+        gl::glGenVertexArrays(1, &pass_ring_[i].vao);
+        gl::glGenBuffers(1, &pass_ring_[i].vbo);
+        gl::glGenBuffers(1, &pass_ring_[i].ibo);
 
-    gl::glBindVertexArray(vao_);
-    gl::glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    gl::glBufferData(GL_ARRAY_BUFFER, STREAM_VBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
-    gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
-    gl::glBufferData(GL_ELEMENT_ARRAY_BUFFER, STREAM_IBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
+        gl::glBindVertexArray(pass_ring_[i].vao);
+        gl::glBindBuffer(GL_ARRAY_BUFFER, pass_ring_[i].vbo);
+        gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, pass_ring_[i].ibo);
 
-    gl::glEnableVertexAttribArray(0);
-    gl::glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(0));
+        gl::glEnableVertexAttribArray(0);
+        gl::glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(0));
 
-    gl::glEnableVertexAttribArray(1);
-    gl::glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(4 * sizeof(float)));
+        gl::glEnableVertexAttribArray(1);
+        gl::glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(4 * sizeof(float)));
 
-    gl::glEnableVertexAttribArray(2);
-    gl::glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(8 * sizeof(float)));
+        gl::glEnableVertexAttribArray(2);
+        gl::glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(8 * sizeof(float)));
 
-    gl::glBindVertexArray(0);
+        gl::glBindVertexArray(0);
+        gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
+        gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    }
 }
 
 RspState::~RspState() {
-    if (vao_ != 0 && gl::glDeleteVertexArrays) gl::glDeleteVertexArrays(1, &vao_);
-    if (vbo_ != 0 && gl::glDeleteBuffers) gl::glDeleteBuffers(1, &vbo_);
-    if (ibo_ != 0 && gl::glDeleteBuffers) gl::glDeleteBuffers(1, &ibo_);
+    for (size_t i = 0; i < PASS_RING_COUNT; ++i) {
+        if (pass_ring_[i].vao != 0 && gl::glDeleteVertexArrays) gl::glDeleteVertexArrays(1, &pass_ring_[i].vao);
+        if (pass_ring_[i].vbo != 0 && gl::glDeleteBuffers) gl::glDeleteBuffers(1, &pass_ring_[i].vbo);
+        if (pass_ring_[i].ibo != 0 && gl::glDeleteBuffers) gl::glDeleteBuffers(1, &pass_ring_[i].ibo);
+    }
 }
 
 void RspState::reset() {
-    flush_batch();
-    vbo_offset_bytes_ = 0;
-    ibo_offset_bytes_ = 0;
+    submit_render_pass();
+    pass_vertices_.clear();
+    pass_indices_.clear();
+    pass_draws_.clear();
+    batch_vertices_.clear();
+    batch_indices_.clear();
     batch_count_ = 0;
     tri_count_ = 0;
     modelview_top_ = 0;
@@ -421,10 +428,10 @@ float RspState::compute_rect_shift_x() const {
     return offset_px;
 }
 
-void RspState::apply_gl_scissor(const FboEntry& fbo) const {
+void RspState::apply_gl_scissor_for_rect(const FboEntry& fbo, const ScissorRect& scissor) const {
     float scale_y = static_cast<float>(fbo.height) / N64_HEIGHT;
-    int sy = static_cast<int>((N64_HEIGHT - static_cast<float>(current_scissor_.y + current_scissor_.height)) * scale_y);
-    int sh = static_cast<int>(static_cast<float>(current_scissor_.height) * scale_y);
+    int sy = static_cast<int>((N64_HEIGHT - static_cast<float>(scissor.y + scissor.height)) * scale_y);
+    int sh = static_cast<int>(static_cast<float>(scissor.height) * scale_y);
 
     int sx = 0;
     int sx_right = fbo.width;
@@ -433,18 +440,22 @@ void RspState::apply_gl_scissor(const FboEntry& fbo) const {
             float norm = ((static_cast<float>(n64_x) - N64_HALF_WIDTH) / (N64_WIDTH * widescreen_scale_)) + 0.5f;
             return static_cast<int>(std::lround(norm * static_cast<float>(fbo.width)));
         };
-        sx = (current_scissor_.x <= 0) ? 0 : map_x(current_scissor_.x);
-        int right_n64 = current_scissor_.x + current_scissor_.width;
+        sx = (scissor.x <= 0) ? 0 : map_x(scissor.x);
+        int right_n64 = scissor.x + scissor.width;
         sx_right = (right_n64 >= static_cast<int>(N64_WIDTH)) ? fbo.width : map_x(right_n64);
     } else {
         float scale_x = static_cast<float>(fbo.width) / N64_WIDTH;
-        sx = static_cast<int>(static_cast<float>(current_scissor_.x) * scale_x);
-        sx_right = static_cast<int>(static_cast<float>(current_scissor_.x + current_scissor_.width) * scale_x);
+        sx = static_cast<int>(static_cast<float>(scissor.x) * scale_x);
+        sx_right = static_cast<int>(static_cast<float>(scissor.x + scissor.width) * scale_x);
     }
 
     int sw = std::max(1, sx_right - sx);
     gl::glEnable(GL_SCISSOR_TEST);
     gl::glScissor(std::max(0, sx), std::max(0, sy), sw, std::max(1, sh));
+}
+
+void RspState::apply_gl_scissor(const FboEntry& fbo) const {
+    apply_gl_scissor_for_rect(fbo, current_scissor_);
 }
 
 void RspState::flush_batch() {
@@ -464,7 +475,23 @@ void RspState::flush_batch() {
         return;
     }
 
-    gl::glUseProgram(prog.program_id);
+    GLuint tex0_id = 0;
+    if (prog.uses_tex0 && (tex_enabled_ || current_batch_tex_ != 0)) {
+        tex0_id = current_batch_tex_;
+    }
+
+    GLuint tex1_id = 0;
+    if (prog.uses_tex1 && tex_enabled_) {
+        uint32_t tile1 = (active_tile_ + 1) & 7u;
+        CachedTexture tex1 = tmem_cache_.fetch_texture(tile1, (other_mode_h_ >> 12) & 3u, (other_mode_h_ >> 14) & 3u);
+        tex1_id = tex1.texture_id;
+    }
+
+    if (!pass_draws_.empty() &&
+        (pass_vertices_.size() + batch_vertices_.size() > MAX_PASS_VERTICES ||
+         pass_draws_.size() >= MAX_PASS_DRAWS)) {
+        submit_render_pass_internal();
+    }
 
     Matrix4 proj = projection_matrix_;
     if (expand_aspect_ && widescreen_scale_ > 1.0f) {
@@ -474,125 +501,204 @@ void RspState::flush_batch() {
 
     float alpha_threshold = cutout_alpha ? ALPHA_THRESHOLD_CUTOUT : ALPHA_THRESHOLD_COMPARE;
 
-    if (prog.uProjection >= 0) gl::glUniform4fv(prog.uProjection, 4, &proj.m[0][0]);
-    if (prog.uModelView >= 0) gl::glUniform4fv(prog.uModelView, 4, &modelview_stack_[modelview_top_].m[0][0]);
-    if (prog.uTexScale >= 0) gl::glUniform2f(prog.uTexScale, current_tex_scale_s_, current_tex_scale_t_);
-    if (prog.uTexOffset >= 0) gl::glUniform2f(prog.uTexOffset, current_tex_offset_s_, current_tex_offset_t_);
-    if (prog.uFogMult >= 0) gl::glUniform1f(prog.uFogMult, fog_mult_);
-    if (prog.uFogOffset >= 0) gl::glUniform1f(prog.uFogOffset, fog_offset_);
-    if (prog.uPrimColor >= 0) gl::glUniform4f(prog.uPrimColor, prim_color_[0], prim_color_[1], prim_color_[2], prim_color_[3]);
-    if (prog.uPrimLodFrac >= 0) gl::glUniform1f(prog.uPrimLodFrac, prim_lod_frac_);
-    if (prog.uEnvColor >= 0) gl::glUniform4f(prog.uEnvColor, env_color_[0], env_color_[1], env_color_[2], env_color_[3]);
-    if (prog.uFogColor >= 0) gl::glUniform4f(prog.uFogColor, fog_color_[0], fog_color_[1], fog_color_[2], fog_color_[3]);
-    if (prog.uBlendColor >= 0) gl::glUniform4f(prog.uBlendColor, blend_color_[0], blend_color_[1], blend_color_[2], blend_color_[3]);
-    if (prog.uAlphaThreshold >= 0) gl::glUniform1f(prog.uAlphaThreshold, alpha_threshold);
-
-    if (prog.uses_tex0 && (tex_enabled_ || current_batch_tex_ != 0)) {
-        if (current_batch_tex_ != 0) {
-            gl::glActiveTexture(GL_TEXTURE0);
-            gl::glBindTexture(GL_TEXTURE_2D, current_batch_tex_);
-            if (prog.uTexture0 >= 0) gl::glUniform1i(prog.uTexture0, 0);
-        }
+    uint32_t first_index = static_cast<uint32_t>(pass_indices_.size());
+    uint16_t base_vtx = static_cast<uint16_t>(pass_vertices_.size());
+    pass_vertices_.insert(pass_vertices_.end(), batch_vertices_.begin(), batch_vertices_.end());
+    pass_indices_.reserve(pass_indices_.size() + batch_indices_.size());
+    for (uint16_t idx : batch_indices_) {
+        pass_indices_.push_back(base_vtx + idx);
     }
+    uint32_t index_count = static_cast<uint32_t>(batch_indices_.size());
 
-    if (prog.uses_tex1 && tex_enabled_) {
-        uint32_t tile1 = (active_tile_ + 1) & 7u;
-        CachedTexture tex1 = tmem_cache_.fetch_texture(tile1, (other_mode_h_ >> 12) & 3u, (other_mode_h_ >> 14) & 3u);
-        if (tex1.texture_id != 0) {
-            gl::glActiveTexture(GL_TEXTURE1);
-            gl::glBindTexture(GL_TEXTURE_2D, tex1.texture_id);
-            if (prog.uTexture1 >= 0) gl::glUniform1i(prog.uTexture1, 1);
-            gl::glActiveTexture(GL_TEXTURE0);
-        }
-    }
+    PassDrawCmd cmd;
+    cmd.prog = prog;
+    cmd.proj = proj;
+    cmd.mv = modelview_stack_[modelview_top_];
+    cmd.tex_scale_s = current_tex_scale_s_;
+    cmd.tex_scale_t = current_tex_scale_t_;
+    cmd.tex_offset_s = current_tex_offset_s_;
+    cmd.tex_offset_t = current_tex_offset_t_;
+    cmd.fog_mult = fog_mult_;
+    cmd.fog_offset = fog_offset_;
+    std::memcpy(cmd.prim_color, prim_color_, sizeof(prim_color_));
+    cmd.prim_lod_frac = prim_lod_frac_;
+    std::memcpy(cmd.env_color, env_color_, sizeof(env_color_));
+    std::memcpy(cmd.fog_color, fog_color_, sizeof(fog_color_));
+    std::memcpy(cmd.blend_color, blend_color_, sizeof(blend_color_));
+    cmd.alpha_threshold = alpha_threshold;
+    cmd.tex0_id = tex0_id;
+    cmd.tex1_id = tex1_id;
+    cmd.geometry_mode = geometry_mode_;
+    cmd.other_mode_h = other_mode_h_;
+    cmd.other_mode_l = other_mode_l_;
+    cmd.scissor = current_scissor_;
+    cmd.first_index = first_index;
+    cmd.index_count = index_count;
 
-    if ((geometry_mode_ & G_ZBUFFER) && !is_copy_or_fill) {
-        gl::glEnable(GL_DEPTH_TEST);
-        gl::glDepthFunc((other_mode_l_ & Z_CMP) ? GL_LEQUAL : GL_ALWAYS);
-        gl::glDepthMask((other_mode_l_ & Z_UPD) ? GL_TRUE : GL_FALSE);
-        if (other_mode_l_ & ZMODE_DEC) {
-            gl::glEnable(GL_POLYGON_OFFSET_FILL);
-            gl::glPolygonOffset(-1.0f, -1.0f);
-        } else {
-            gl::glDisable(GL_POLYGON_OFFSET_FILL);
-        }
-    } else {
-        gl::glDisable(GL_DEPTH_TEST);
-        gl::glDepthMask(GL_FALSE);
-        gl::glDisable(GL_POLYGON_OFFSET_FILL);
-    }
-
-    if (geometry_mode_ & (G_CULL_FRONT | G_CULL_BACK)) {
-        gl::glEnable(GL_CULL_FACE);
-        if ((geometry_mode_ & (G_CULL_FRONT | G_CULL_BACK)) == (G_CULL_FRONT | G_CULL_BACK)) {
-            gl::glCullFace(GL_FRONT_AND_BACK);
-        } else if (geometry_mode_ & G_CULL_FRONT) {
-            gl::glCullFace(GL_FRONT);
-        } else {
-            gl::glCullFace(GL_BACK);
-        }
-    } else {
-        gl::glDisable(GL_CULL_FACE);
-    }
-
-    bool blend_requested = !is_copy_or_fill && ((other_mode_l_ & (FORCE_BL | ZMODE_XLU)) != 0);
-    if (blend_requested) {
-        uint32_t blend_cycle = (cycle_type == G_CYC_2CYCLE) ? 1u : 0u;
-        uint32_t m_src = (other_mode_l_ >> (22u - 2u * blend_cycle)) & 3u;
-        uint32_t b_src = (other_mode_l_ >> (18u - 2u * blend_cycle)) & 3u;
-        if (m_src == 1u) {
-            gl::glEnable(GL_BLEND);
-            GLenum dst_factor = (b_src == 2u) ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA;
-            gl::glBlendFunc(GL_SRC_ALPHA, dst_factor);
-        } else {
-            gl::glDisable(GL_BLEND);
-        }
-    } else {
-        gl::glDisable(GL_BLEND);
-    }
-
-    FboEntry* current_fbo = fbo_manager_.get_current_fbo();
-    if (current_fbo) {
-        apply_gl_scissor(*current_fbo);
-    }
-
-    size_t vbo_bytes = batch_vertices_.size() * sizeof(BatchVertex);
-    size_t ibo_bytes = batch_indices_.size() * sizeof(uint16_t);
-
-    if (vbo_offset_bytes_ + vbo_bytes > STREAM_VBO_SIZE_BYTES ||
-        ibo_offset_bytes_ + ibo_bytes > STREAM_IBO_SIZE_BYTES) {
-        vbo_offset_bytes_ = 0;
-        ibo_offset_bytes_ = 0;
-        gl::glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        gl::glBufferData(GL_ARRAY_BUFFER, STREAM_VBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
-        gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
-        gl::glBufferData(GL_ELEMENT_ARRAY_BUFFER, STREAM_IBO_SIZE_BYTES, nullptr, GL_STREAM_DRAW);
-    }
-
-    gl::glBindVertexArray(vao_);
-    gl::glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    gl::glBufferSubData(GL_ARRAY_BUFFER, vbo_offset_bytes_, vbo_bytes, batch_vertices_.data());
-
-    gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo_);
-    gl::glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, ibo_offset_bytes_, ibo_bytes, batch_indices_.data());
-
-    gl::glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(vbo_offset_bytes_));
-    gl::glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(vbo_offset_bytes_ + 4 * sizeof(float)));
-    gl::glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), reinterpret_cast<void*>(vbo_offset_bytes_ + 8 * sizeof(float)));
-
-    gl::glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(batch_indices_.size()), GL_UNSIGNED_SHORT, reinterpret_cast<void*>(ibo_offset_bytes_));
-    gl::glBindVertexArray(0);
+    pass_draws_.push_back(cmd);
 
     batch_count_++;
-    tri_count_ += static_cast<uint32_t>(batch_indices_.size() / 3);
-
-    vbo_offset_bytes_ += vbo_bytes;
-    vbo_offset_bytes_ = (vbo_offset_bytes_ + 15u) & ~15u;
-    ibo_offset_bytes_ += ibo_bytes;
-    ibo_offset_bytes_ = (ibo_offset_bytes_ + 3u) & ~3u;
+    tri_count_ += static_cast<uint32_t>(index_count / 3);
 
     batch_vertices_.clear();
     batch_indices_.clear();
+}
+
+void RspState::submit_render_pass() {
+    flush_batch();
+    submit_render_pass_internal();
+}
+
+void RspState::submit_render_pass_internal() {
+    if (pass_draws_.empty()) return;
+
+    uint64_t start_pc = SDL_GetPerformanceCounter();
+
+    PassBufferSlot& slot = pass_ring_[ring_cursor_];
+    ring_cursor_ = (ring_cursor_ + 1) % PASS_RING_COUNT;
+
+    gl::glBindVertexArray(slot.vao);
+    gl::glBindBuffer(GL_ARRAY_BUFFER, slot.vbo);
+    gl::glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(pass_vertices_.size() * sizeof(BatchVertex)),
+                     pass_vertices_.data(), GL_STREAM_DRAW);
+
+    gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, slot.ibo);
+    gl::glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(pass_indices_.size() * sizeof(uint16_t)),
+                     pass_indices_.data(), GL_STREAM_DRAW);
+
+    GLuint last_prog = 0;
+    Matrix4 last_proj{};
+    Matrix4 last_mv{};
+    GLuint last_tex0 = 0xFFFFFFFFu;
+    GLuint last_tex1 = 0xFFFFFFFFu;
+    ScissorRect last_scissor{ -1, -1, -1, -1 };
+    std::memset(&last_proj, 0xFF, sizeof(last_proj));
+    std::memset(&last_mv, 0xFF, sizeof(last_mv));
+
+    for (const auto& cmd : pass_draws_) {
+        if (cmd.prog.program_id != last_prog) {
+            gl::glUseProgram(cmd.prog.program_id);
+            last_prog = cmd.prog.program_id;
+            std::memset(&last_proj, 0xFF, sizeof(last_proj));
+            std::memset(&last_mv, 0xFF, sizeof(last_mv));
+            last_tex0 = 0xFFFFFFFFu;
+            last_tex1 = 0xFFFFFFFFu;
+        }
+
+        if (std::memcmp(&cmd.proj, &last_proj, sizeof(Matrix4)) != 0) {
+            if (cmd.prog.uProjection >= 0) {
+                gl::glUniform4fv(cmd.prog.uProjection, 4, &cmd.proj.m[0][0]);
+            }
+            last_proj = cmd.proj;
+        }
+
+        if (std::memcmp(&cmd.mv, &last_mv, sizeof(Matrix4)) != 0) {
+            if (cmd.prog.uModelView >= 0) {
+                gl::glUniform4fv(cmd.prog.uModelView, 4, &cmd.mv.m[0][0]);
+            }
+            last_mv = cmd.mv;
+        }
+
+        if (cmd.prog.uTexScale >= 0) gl::glUniform2f(cmd.prog.uTexScale, cmd.tex_scale_s, cmd.tex_scale_t);
+        if (cmd.prog.uTexOffset >= 0) gl::glUniform2f(cmd.prog.uTexOffset, cmd.tex_offset_s, cmd.tex_offset_t);
+        if (cmd.prog.uFogMult >= 0) gl::glUniform1f(cmd.prog.uFogMult, cmd.fog_mult);
+        if (cmd.prog.uFogOffset >= 0) gl::glUniform1f(cmd.prog.uFogOffset, cmd.fog_offset);
+        if (cmd.prog.uPrimColor >= 0) gl::glUniform4fv(cmd.prog.uPrimColor, 1, cmd.prim_color);
+        if (cmd.prog.uPrimLodFrac >= 0) gl::glUniform1f(cmd.prog.uPrimLodFrac, cmd.prim_lod_frac);
+        if (cmd.prog.uEnvColor >= 0) gl::glUniform4fv(cmd.prog.uEnvColor, 1, cmd.env_color);
+        if (cmd.prog.uFogColor >= 0) gl::glUniform4fv(cmd.prog.uFogColor, 1, cmd.fog_color);
+        if (cmd.prog.uBlendColor >= 0) gl::glUniform4fv(cmd.prog.uBlendColor, 1, cmd.blend_color);
+        if (cmd.prog.uAlphaThreshold >= 0) gl::glUniform1f(cmd.prog.uAlphaThreshold, cmd.alpha_threshold);
+
+        if (cmd.prog.uses_tex0 && cmd.tex0_id != 0) {
+            if (cmd.tex0_id != last_tex0) {
+                gl::glActiveTexture(GL_TEXTURE0);
+                gl::glBindTexture(GL_TEXTURE_2D, cmd.tex0_id);
+                last_tex0 = cmd.tex0_id;
+            }
+            if (cmd.prog.uTexture0 >= 0) gl::glUniform1i(cmd.prog.uTexture0, 0);
+        }
+
+        if (cmd.prog.uses_tex1 && cmd.tex1_id != 0) {
+            if (cmd.tex1_id != last_tex1) {
+                gl::glActiveTexture(GL_TEXTURE1);
+                gl::glBindTexture(GL_TEXTURE_2D, cmd.tex1_id);
+                last_tex1 = cmd.tex1_id;
+            }
+            if (cmd.prog.uTexture1 >= 0) gl::glUniform1i(cmd.prog.uTexture1, 1);
+            gl::glActiveTexture(GL_TEXTURE0);
+        }
+
+        uint32_t cycle_type = (cmd.other_mode_h >> 20) & 3u;
+        bool is_copy_or_fill = (cycle_type == G_CYC_COPY || cycle_type == G_CYC_FILL);
+
+        if ((cmd.geometry_mode & G_ZBUFFER) && !is_copy_or_fill) {
+            gl::glEnable(GL_DEPTH_TEST);
+            gl::glDepthFunc((cmd.other_mode_l & Z_CMP) ? GL_LEQUAL : GL_ALWAYS);
+            gl::glDepthMask((cmd.other_mode_l & Z_UPD) ? GL_TRUE : GL_FALSE);
+            if (cmd.other_mode_l & ZMODE_DEC) {
+                gl::glEnable(GL_POLYGON_OFFSET_FILL);
+                gl::glPolygonOffset(-1.0f, -1.0f);
+            } else {
+                gl::glDisable(GL_POLYGON_OFFSET_FILL);
+            }
+        } else {
+            gl::glDisable(GL_DEPTH_TEST);
+            gl::glDepthMask(GL_FALSE);
+            gl::glDisable(GL_POLYGON_OFFSET_FILL);
+        }
+
+        if (cmd.geometry_mode & (G_CULL_FRONT | G_CULL_BACK)) {
+            gl::glEnable(GL_CULL_FACE);
+            if ((cmd.geometry_mode & (G_CULL_FRONT | G_CULL_BACK)) == (G_CULL_FRONT | G_CULL_BACK)) {
+                gl::glCullFace(GL_FRONT_AND_BACK);
+            } else if (cmd.geometry_mode & G_CULL_FRONT) {
+                gl::glCullFace(GL_FRONT);
+            } else {
+                gl::glCullFace(GL_BACK);
+            }
+        } else {
+            gl::glDisable(GL_CULL_FACE);
+        }
+
+        bool blend_requested = !is_copy_or_fill && ((cmd.other_mode_l & (FORCE_BL | ZMODE_XLU)) != 0);
+        if (blend_requested) {
+            uint32_t blend_cycle = (cycle_type == G_CYC_2CYCLE) ? 1u : 0u;
+            uint32_t m_src = (cmd.other_mode_l >> (22u - 2u * blend_cycle)) & 3u;
+            uint32_t b_src = (cmd.other_mode_l >> (18u - 2u * blend_cycle)) & 3u;
+            if (m_src == 1u) {
+                gl::glEnable(GL_BLEND);
+                GLenum dst_factor = (b_src == 2u) ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA;
+                gl::glBlendFunc(GL_SRC_ALPHA, dst_factor);
+            } else {
+                gl::glDisable(GL_BLEND);
+            }
+        } else {
+            gl::glDisable(GL_BLEND);
+        }
+
+        if (cmd.scissor.x != last_scissor.x || cmd.scissor.y != last_scissor.y ||
+            cmd.scissor.width != last_scissor.width || cmd.scissor.height != last_scissor.height) {
+            FboEntry* current_fbo = fbo_manager_.get_current_fbo();
+            if (current_fbo) {
+                apply_gl_scissor_for_rect(*current_fbo, cmd.scissor);
+            }
+            last_scissor = cmd.scissor;
+        }
+
+        gl::glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.index_count), GL_UNSIGNED_SHORT,
+                           reinterpret_cast<const void*>(static_cast<uintptr_t>(cmd.first_index * sizeof(uint16_t))));
+    }
+
+    gl::glBindVertexArray(0);
+    pass_vertices_.clear();
+    pass_indices_.clear();
+    pass_draws_.clear();
+    pass_count_++;
+
+    uint64_t end_pc = SDL_GetPerformanceCounter();
+    double submit_ms = static_cast<double>(end_pc - start_pc) * 1000.0 / static_cast<double>(SDL_GetPerformanceFrequency());
+    total_submit_ms_ += submit_ms;
 }
 
 void RspState::draw_tri1(uint32_t v0, uint32_t v1, uint32_t v2) {
@@ -746,6 +852,7 @@ void RspState::draw_fill_rect(uint32_t ulx, uint32_t uly, uint32_t lrx, uint32_t
 
         if (rect_align_origin_ == G_EX_ORIGIN_NONE && rect_align_offset_x_ == 0 &&
             ulx == 0 && uly == 0 && lrx >= 319 * 4 && lry >= 239 * 4) {
+            submit_render_pass();
             FboEntry* current_fbo = fbo_manager_.get_current_fbo();
             if (current_fbo) {
                 apply_gl_scissor(*current_fbo);
