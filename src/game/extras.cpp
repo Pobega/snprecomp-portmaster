@@ -20,7 +20,9 @@
 #include <cstdint>
 
 #include "recomp.h"
+#ifndef SNP_BACKEND_GLES3
 #include "rt64_screen_filter.h"
+#endif
 
 #include "snp_config.h"
 #include "snp_recomp_hooks.h"
@@ -66,11 +68,13 @@ extern "C" void snp_extras_frame(uint8_t* rdram) {
     using snp::config::Option;
     using snp::config::get_option;
 
+#ifndef SNP_BACKEND_GLES3
     // Menus Only: the filter in the menus (the front end), not in play or the
     // intro scenes (played like stages).
     bool filter_off = snp::config::get_screen_filter_menus_only() && !snp_in_front_end_menus();
     RT64::setScreenFilter(filter_off ? RT64::ScreenFilter::None : static_cast<RT64::ScreenFilter>(snp::config::get_screen_filter()));
     RT64::setBloom(static_cast<RT64::Bloom>(snp::config::get_bloom()));
+#endif
 
     if (get_option(Option::InfiniteHealth)) {
         uint32_t& health = word_at(rdram, health_addr);

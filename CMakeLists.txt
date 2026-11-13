@@ -50,11 +50,11 @@ if (APPLE)
     enable_language(OBJC OBJCXX)
 endif()
 
+option(SNP_BACKEND_GLES3 "Build with lightweight GLES3 renderer and handheld frontend" OFF)
+
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     option(RECOMP_FLATPAK "Configure the build for Flatpak compatibility." OFF)
 endif()
-
-
 
 # Avoid warning about DOWNLOAD_EXTRACT_TIMESTAMP in CMake 3.24:
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
@@ -68,12 +68,14 @@ if (WIN32)
     set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/lib/")
 endif()
 
-set(RT64_STATIC TRUE)
-set(RT64_SDL_WINDOW_VULKAN TRUE)
-add_compile_definitions(
-    HLSL_CPU
-    __PRFCHWINTRIN_H
-)
+if (NOT SNP_BACKEND_GLES3)
+    set(RT64_STATIC TRUE)
+    set(RT64_SDL_WINDOW_VULKAN TRUE)
+    add_compile_definitions(
+        HLSL_CPU
+        __PRFCHWINTRIN_H
+    )
+endif()
 
 if (RECOMP_FLATPAK)
     add_compile_definitions(RECOMP_FLATPAK)
@@ -84,20 +86,22 @@ include(${CMAKE_SOURCE_DIR}/cmake/CrossCompile.cmake)
 # SDL2, FreeType and nfd for Android.
 include(${CMAKE_SOURCE_DIR}/cmake/Android.cmake)
 
-# Local RT64 fixes (lib-patches/rt64/), applied to the submodule at configure time.
 include(${CMAKE_SOURCE_DIR}/cmake/ApplyLibPatches.cmake)
-snp_apply_lib_patches(rt64)
-# plume (RT64's rendering layer) is a submodule inside rt64.
-snp_apply_lib_patches(plume lib/rt64/src/contrib/plume)
+if (NOT SNP_BACKEND_GLES3)
+    # Local RT64 fixes (lib-patches/rt64/), applied to the submodule at configure time.
+    snp_apply_lib_patches(rt64)
+    # plume (RT64's rendering layer) is a submodule inside rt64.
+    snp_apply_lib_patches(plume lib/rt64/src/contrib/plume)
 
-# Linux: the ROM picker is the desktop's own, through xdg-desktop-portal (D-Bus),
-# not GTK's. GTK may only be used from the thread that started it, and the
-# picker opens from the UI thread: it crashed inside GTK as it opened, now and
-# then (issues #5 and #9).
-if(UNIX AND NOT APPLE)
-    set(NFD_PORTAL ON CACHE BOOL "" FORCE)
+    # Linux: the ROM picker is the desktop's own, through xdg-desktop-portal (D-Bus),
+    # not GTK's. GTK may only be used from the thread that started it, and the
+    # picker opens from the UI thread: it crashed inside GTK as it opened, now and
+    # then (issues #5 and #9).
+    if(UNIX AND NOT APPLE)
+        set(NFD_PORTAL ON CACHE BOOL "" FORCE)
+    endif()
+    add_subdirectory(${CMAKE_SOURCE_DIR}/lib/rt64 ${CMAKE_BINARY_DIR}/rt64)
 endif()
-add_subdirectory(${CMAKE_SOURCE_DIR}/lib/rt64 ${CMAKE_BINARY_DIR}/rt64)
 
 set(BUILD_SHARED_LIBS OFF)
 
@@ -111,7 +115,13 @@ file(GLOB SNP_N64RECOMP_PATCHES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/lib-patche
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime)
 
 
-target_include_directories(rt64 PRIVATE ${CMAKE_BINARY_DIR}/rt64/src)
+if (NOT SNP_BACKEND_GLES3)
+    target_include_directories(rt64 PRIVATE ${CMAKE_BINARY_DIR}/rt64/src)
+endif()
+
+if (SNP_BACKEND_GLES3 AND NOT CMAKE_CROSSCOMPILING AND NOT TARGET file_to_c)
+    add_executable(file_to_c ${CMAKE_SOURCE_DIR}/tools/file_to_c.c)
+endif()
 
 # RecompiledFuncs - Library containing the primary recompiler output
 add_library(RecompiledFuncs STATIC)
@@ -273,11 +283,21 @@ endif()
 # recompiled RSP audio microcode (rsp/, generated from the ROM). If none of
 # these exist (e.g. a bare checkout), a placeholder target is built instead
 # so the rest of the configuration can still be checked.
-file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
-    ${CMAKE_SOURCE_DIR}/src/main/*.cpp
-    ${CMAKE_SOURCE_DIR}/src/game/*.cpp
-    ${CMAKE_SOURCE_DIR}/rsp/*.cpp
-)
+if (SNP_BACKEND_GLES3)
+    file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/src/gles3/*.cpp
+        ${CMAKE_SOURCE_DIR}/src/handheld/*.cpp
+        ${CMAKE_SOURCE_DIR}/src/game/*.cpp
+        ${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp
+        ${CMAKE_SOURCE_DIR}/rsp/*.cpp
+    )
+else()
+    file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/src/main/*.cpp
+        ${CMAKE_SOURCE_DIR}/src/game/*.cpp
+        ${CMAKE_SOURCE_DIR}/rsp/*.cpp
+    )
+endif()
 
 # src/main/register_overlays.cpp #includes RecompiledFuncs/recomp_overlays.inl,
 # which (like the rest of RecompiledFuncs/) doesn't exist yet on a fresh
@@ -299,23 +319,40 @@ if (NOT SOURCES)
     set(SOURCES ${CMAKE_BINARY_DIR}/snp_placeholder.cpp)
 endif()
 
-target_include_directories(SnPRecompiled PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/include
-    ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/thirdparty/sse2neon
-    ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib
-    ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/hlslpp/include
-    ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/inc
-    ${CMAKE_SOURCE_DIR}/lib/rt64/src
-    ${CMAKE_SOURCE_DIR}/lib/rt64/src/rhi
-    ${CMAKE_SOURCE_DIR}/lib/rt64/src/render
-    ${CMAKE_SOURCE_DIR}/lib/RecompFrontend/recompinput/include
-    ${CMAKE_SOURCE_DIR}/lib/RecompFrontend/recompui/include
-    ${CMAKE_SOURCE_DIR}/lib/RecompFrontend/recompui/src
-    ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/nativefiledialog-extended/src/include
-    ${CMAKE_SOURCE_DIR}/lib/SlotMap
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
+if (SNP_BACKEND_GLES3)
+    target_include_directories(SnPRecompiled PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/handheld
+        ${CMAKE_SOURCE_DIR}/src/gles3
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/lib/tomlplusplus/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/ultramodern/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/librecomp/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/thirdparty
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/thirdparty/concurrentqueue
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/thirdparty/sse2neon
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    target_compile_definitions(SnPRecompiled PRIVATE SNP_BACKEND_GLES3)
+else()
+    target_include_directories(SnPRecompiled PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/thirdparty/sse2neon
+        ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib
+        ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/hlslpp/include
+        ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/inc
+        ${CMAKE_SOURCE_DIR}/lib/rt64/src
+        ${CMAKE_SOURCE_DIR}/lib/rt64/src/rhi
+        ${CMAKE_SOURCE_DIR}/lib/rt64/src/render
+        ${CMAKE_SOURCE_DIR}/lib/RecompFrontend/recompinput/include
+        ${CMAKE_SOURCE_DIR}/lib/RecompFrontend/recompui/include
+        ${CMAKE_SOURCE_DIR}/lib/RecompFrontend/recompui/src
+        ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/nativefiledialog-extended/src/include
+        ${CMAKE_SOURCE_DIR}/lib/SlotMap
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
+endif()
 
 # Generate icon_bytes.c from the app icon PNG (the window icon, set in
 # create_window in src/main/main.cpp).
@@ -415,30 +452,46 @@ if (APPLE)
 endif()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-    find_package(SDL2 REQUIRED)
+    if (SNP_BACKEND_GLES3)
+        find_package(SDL2 QUIET)
+        if (TARGET SDL2::SDL2)
+            set(SNP_SDL2_TARGET SDL2::SDL2)
+        else()
+            find_package(PkgConfig REQUIRED)
+            pkg_check_modules(SDL2 REQUIRED sdl2)
+            set(SNP_SDL2_TARGET ${SDL2_LIBRARIES})
+            target_link_directories(SnPRecompiled PRIVATE ${SDL2_LIBRARY_DIRS})
+        endif()
+        target_include_directories(SnPRecompiled PRIVATE ${SDL2_INCLUDE_DIRS})
 
-    add_compile_definitions("PLUME_SDL_VULKAN_ENABLED")
-    add_compile_definitions("RT64_SDL_WINDOW_VULKAN")
+        set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+        set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+        find_package(Threads REQUIRED)
+    else()
+        find_package(SDL2 REQUIRED)
+        add_compile_definitions("PLUME_SDL_VULKAN_ENABLED")
+        add_compile_definitions("RT64_SDL_WINDOW_VULKAN")
 
-    message(STATUS "SDL2_FOUND = ${SDL2_FOUND}")
-    message(STATUS "SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}")
+        message(STATUS "SDL2_FOUND = ${SDL2_FOUND}")
+        message(STATUS "SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}")
 
-    target_include_directories(SnPRecompiled PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_include_directories(SnPRecompiled PRIVATE ${SDL2_INCLUDE_DIRS})
 
-    find_package(Freetype REQUIRED)
+        find_package(Freetype REQUIRED)
 
-    message(STATUS "FREETYPE_FOUND = ${FREETYPE_FOUND}")
-    message(STATUS "FREETYPE_INCLUDE_DIRS = ${FREETYPE_INCLUDE_DIRS}")
-    message(STATUS "FREETYPE_LIBRARIES = ${FREETYPE_LIBRARIES}")
+        message(STATUS "FREETYPE_FOUND = ${FREETYPE_FOUND}")
+        message(STATUS "FREETYPE_INCLUDE_DIRS = ${FREETYPE_INCLUDE_DIRS}")
+        message(STATUS "FREETYPE_LIBRARIES = ${FREETYPE_LIBRARIES}")
 
-    include_directories(${FREETYPE_LIBRARIES})
-    target_link_libraries(SnPRecompiled PRIVATE ${FREETYPE_LIBRARIES} SDL2::SDL2 X11)
+        include_directories(${FREETYPE_LIBRARIES})
+        target_link_libraries(SnPRecompiled PRIVATE ${FREETYPE_LIBRARIES} SDL2::SDL2 X11)
 
-    set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-    set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-    find_package(Threads REQUIRED)
+        set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+        set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+        find_package(Threads REQUIRED)
 
-    target_link_libraries(SnPRecompiled PRIVATE "-latomic -static-libstdc++" ${CMAKE_DL_LIBS} Threads::Threads)
+        target_link_libraries(SnPRecompiled PRIVATE "-latomic -static-libstdc++" ${CMAKE_DL_LIBS} Threads::Threads)
+    endif()
 endif()
 
 if (ANDROID)
@@ -457,70 +510,6 @@ if (ANDROID)
     target_link_libraries(rt64 SDL2::SDL2)
     target_include_directories(SnPRecompiled PRIVATE ${SDL2_INCLUDE_DIRS})
 endif()
-
-# TODO fix the rt64 CMake script so that this doesn't need to be duplicated here
-# For DXC
-set (DXC_COMMON_OPTS "-I${PROJECT_SOURCE_DIR}/src")
-set (DXC_DXIL_OPTS "-Wno-ignored-attributes")
-set (DXC_SPV_OPTS "-spirv" "-fspv-target-env=vulkan1.0" "-fvk-use-dx-layout")
-set (DXC_PS_OPTS "${DXC_COMMON_OPTS}" "-E" "PSMain" "-T ps_6_0" "-D DYNAMIC_RENDER_PARAMS")
-set (DXC_VS_OPTS "${DXC_COMMON_OPTS}" "-E" "VSMain" "-T vs_6_0" "-D DYNAMIC_RENDER_PARAMS" "-fvk-invert-y")
-set (DXC_CS_OPTS "${DXC_COMMON_OPTS}" "-E" "CSMain" "-T cs_6_0")
-set (DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T gs_6_0")
-set (DXC_RT_OPTS "${DXC_COMMON_OPTS}" "-D" "RT_SHADER" "-T" "lib_6_3" "-fspv-target-env=vulkan1.1spirv1.4" "-fspv-extension=SPV_KHR_ray_tracing" "-fspv-extension=SPV_EXT_descriptor_indexing")
-
-if (${WIN32})
-    add_compile_definitions(NOMINMAX)
-endif()
-
-# DXC (used by recompui for its shaders) runs on the build machine, so it's picked by the host,
-# not the target; the two differ when cross-compiling for Android.
-if (CMAKE_HOST_WIN32)
-    set (DXC "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc.exe")
-elseif (CMAKE_HOST_APPLE)
-    # Apple's binary is universal, so it'll work on both x86_64 and arm64
-    set (DXC "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-macos")
-    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-        set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
-    else()
-        set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
-    endif()
-else()
-    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-        set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc-linux")
-    else()
-        set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-linux")
-    endif()
-endif()
-
-set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime)
-set(RECOMP_FRONTEND_RT64_PATH ${CMAKE_SOURCE_DIR}/lib/rt64)
-
-# Local frontend changes (lib-patches/RecompFrontend/), applied the same way.
-snp_apply_lib_patches(RecompFrontend)
-add_subdirectory(${CMAKE_SOURCE_DIR}/lib/RecompFrontend)
-
-# Upstream RmlUi 6.0 uses uint32_t and friends without including <cstdint>, which clang with a
-# current libstdc++ rejects, and recompui includes those headers. Add the include from here
-# rather than patching the submodule. clang-cl (MSVC frontend variant, incl. Windows) needs the
-# native /FI spelling instead of GNU -include: the latter's quote-style header lookup fails to
-# resolve bare STL header names (e.g. "cstdint") when clang-cl is generating a precompiled header,
-# such as RmlUi's own cmake_pch.cxx, even though INCLUDE-based system search works everywhere else.
-if(MSVC)
-    set(SNP_CSTDINT_FORCE_INCLUDE "/FI cstdint")
-else()
-    set(SNP_CSTDINT_FORCE_INCLUDE "-include cstdint")
-endif()
-if (ANDROID)
-    target_include_directories(recompui PRIVATE ${SDL2_INCLUDE_DIRS})
-    target_include_directories(recompinput PRIVATE ${SDL2_INCLUDE_DIRS})
-endif()
-
-foreach(_snp_rml_target rmlui_core rmlui_debugger recompui)
-    if(TARGET ${_snp_rml_target})
-        target_compile_options(${_snp_rml_target} PRIVATE "SHELL:$<$<COMPILE_LANGUAGE:CXX>:${SNP_CSTDINT_FORCE_INCLUDE}>")
-    endif()
-endforeach()
 
 # These libraries reference each other's symbols in both directions (e.g.
 # recompinput's player-assignment code calls into recompui's
@@ -544,21 +533,103 @@ else()
     set(SNP_LINK_GROUP_END "")
 endif()
 
-target_link_libraries(SnPRecompiled PRIVATE
-    ${SNP_LINK_GROUP_START}
-    # PatchesLib must come before RecompiledFuncs. Both define the functions that a RECOMP_PATCH
-    # replaces (for example the patched func_80046B20) as weak symbols, and the linker keeps the
-    # first definition it finds, so listing RecompiledFuncs first would silently drop the patches.
-    PatchesLib
-    RecompiledFuncs
-    recompui
-    recompinput
-    librecomp
-    ultramodern
-    rt64
-    nfd
-    ${SNP_LINK_GROUP_END}
-)
+if (SNP_BACKEND_GLES3)
+    target_link_libraries(SnPRecompiled PRIVATE
+        ${SNP_LINK_GROUP_START}
+        PatchesLib
+        RecompiledFuncs
+        librecomp
+        ultramodern
+        ${SNP_SDL2_TARGET}
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+        -Wl,-Bstatic -latomic -Wl,-Bdynamic
+        -static-libstdc++
+        -static-libgcc
+        $<$<CXX_COMPILER_ID:GNU>:-Wl,--allow-multiple-definition>
+        ${SNP_LINK_GROUP_END}
+    )
+else()
+    # TODO fix the rt64 CMake script so that this doesn't need to be duplicated here
+    # For DXC
+    set (DXC_COMMON_OPTS "-I${PROJECT_SOURCE_DIR}/src")
+    set (DXC_DXIL_OPTS "-Wno-ignored-attributes")
+    set (DXC_SPV_OPTS "-spirv" "-fspv-target-env=vulkan1.0" "-fvk-use-dx-layout")
+    set (DXC_PS_OPTS "${DXC_COMMON_OPTS}" "-E" "PSMain" "-T ps_6_0" "-D DYNAMIC_RENDER_PARAMS")
+    set (DXC_VS_OPTS "${DXC_COMMON_OPTS}" "-E" "VSMain" "-T vs_6_0" "-D DYNAMIC_RENDER_PARAMS" "-fvk-invert-y")
+    set (DXC_CS_OPTS "${DXC_COMMON_OPTS}" "-E" "CSMain" "-T cs_6_0")
+    set (DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T gs_6_0")
+    set (DXC_RT_OPTS "${DXC_COMMON_OPTS}" "-D" "RT_SHADER" "-T" "lib_6_3" "-fspv-target-env=vulkan1.1spirv1.4" "-fspv-extension=SPV_KHR_ray_tracing" "-fspv-extension=SPV_EXT_descriptor_indexing")
+
+    if (${WIN32})
+        add_compile_definitions(NOMINMAX)
+    endif()
+
+    # DXC (used by recompui for its shaders) runs on the build machine, so it's picked by the host,
+    # not the target; the two differ when cross-compiling for Android.
+    if (CMAKE_HOST_WIN32)
+        set (DXC "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc.exe")
+    elseif (CMAKE_HOST_APPLE)
+        # Apple's binary is universal, so it'll work on both x86_64 and arm64
+        set (DXC "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-macos")
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+            set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
+        else()
+            set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
+        endif()
+    else()
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+            set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc-linux")
+        else()
+            set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-linux")
+        endif()
+    endif()
+
+    set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime)
+    set(RECOMP_FRONTEND_RT64_PATH ${CMAKE_SOURCE_DIR}/lib/rt64)
+
+    # Local frontend changes (lib-patches/RecompFrontend/), applied the same way.
+    snp_apply_lib_patches(RecompFrontend)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/lib/RecompFrontend)
+
+    # Upstream RmlUi 6.0 uses uint32_t and friends without including <cstdint>, which clang with a
+    # current libstdc++ rejects, and recompui includes those headers. Add the include from here
+    # rather than patching the submodule. clang-cl (MSVC frontend variant, incl. Windows) needs the
+    # native /FI spelling instead of GNU -include: the latter's quote-style header lookup fails to
+    # resolve bare STL header names (e.g. "cstdint") when clang-cl is generating a precompiled header,
+    # such as RmlUi's own cmake_pch.cxx, even though INCLUDE-based system search works everywhere else.
+    if(MSVC)
+        set(SNP_CSTDINT_FORCE_INCLUDE "/FI cstdint")
+    else()
+        set(SNP_CSTDINT_FORCE_INCLUDE "-include cstdint")
+    endif()
+    if (ANDROID)
+        target_include_directories(recompui PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_include_directories(recompinput PRIVATE ${SDL2_INCLUDE_DIRS})
+    endif()
+
+    foreach(_snp_rml_target rmlui_core rmlui_debugger recompui)
+        if(TARGET ${_snp_rml_target})
+            target_compile_options(${_snp_rml_target} PRIVATE "SHELL:$<$<COMPILE_LANGUAGE:CXX>:${SNP_CSTDINT_FORCE_INCLUDE}>")
+        endif()
+    endforeach()
+
+    target_link_libraries(SnPRecompiled PRIVATE
+        ${SNP_LINK_GROUP_START}
+        # PatchesLib must come before RecompiledFuncs. Both define the functions that a RECOMP_PATCH
+        # replaces (for example the patched func_80046B20) as weak symbols, and the linker keeps the
+        # first definition it finds, so listing RecompiledFuncs first would silently drop the patches.
+        PatchesLib
+        RecompiledFuncs
+        recompui
+        recompinput
+        librecomp
+        ultramodern
+        rt64
+        nfd
+        ${SNP_LINK_GROUP_END}
+    )
+endif()
 
 
 # Embed all .nrm files in the "mods" directory
@@ -598,6 +669,8 @@ elseif (EXISTS "${SNP_ROM_FILE}")
         DEPENDS ${CMAKE_SOURCE_DIR}/n_aspMain.jp.toml RSPRecomp
     )
     target_sources(SnPRecompiled PRIVATE ${CMAKE_SOURCE_DIR}/rsp/n_aspMain.cpp)
+    target_compile_definitions(SnPRecompiled PRIVATE SNP_HAS_RSP_AUDIO)
+elseif (EXISTS "${CMAKE_SOURCE_DIR}/rsp/n_aspMain.cpp")
     target_compile_definitions(SnPRecompiled PRIVATE SNP_HAS_RSP_AUDIO)
 endif()
 

@@ -1,0 +1,74 @@
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+index e6dd22b..661eb6a 100644
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -10,6 +10,7 @@
+ #include <iostream>
+ #include <optional>
+ #include <mutex>
++#include <condition_variable>
+ #include <array>
+ #include <cinttypes>
+ #include <cuchar>
+@@ -483,6 +484,10 @@ extern "C" void do_break(uint32_t vram) {
+ std::string current_game_mode_id;
+ std::optional<std::u8string> current_game = std::nullopt;
+ std::atomic<GameStatus> game_status = GameStatus::None;
++#if !defined(__cpp_lib_atomic_wait) || __cpp_lib_atomic_wait < 201907L
++std::mutex game_status_mutex;
++std::condition_variable game_status_cv;
++#endif
+ 
+ void run_thread_function(uint8_t* rdram, uint64_t addr, uint64_t sp, uint64_t arg) {
+     auto find_it = game_roms.find(current_game.value());
+@@ -550,8 +555,16 @@ void recomp::start_game(const std::u8string& game_id, const std::string& game_mo
+     std::lock_guard<std::mutex> lock(current_game_mutex);
+     current_game_mode_id = game_mode_id;
+     current_game = game_id;
++#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
+     game_status.store(GameStatus::Running);
+     game_status.notify_all();
++#else
++    {
++        std::lock_guard<std::mutex> status_lock(game_status_mutex);
++        game_status.store(GameStatus::Running);
++    }
++    game_status_cv.notify_all();
++#endif
+     mods::set_latest_game_mode_id(game_mode_id);
+ }
+ 
+@@ -564,9 +577,18 @@ moodycamel::LightweightSemaphore graphics_shutdown_ready;
+ 
+ void ultramodern::quit() {
+     exited.store(true);
++#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
+     GameStatus desired = GameStatus::None;
+     game_status.compare_exchange_strong(desired, GameStatus::Quit);
+     game_status.notify_all();
++#else
++    {
++        std::lock_guard<std::mutex> status_lock(game_status_mutex);
++        GameStatus desired = GameStatus::None;
++        game_status.compare_exchange_strong(desired, GameStatus::Quit);
++    }
++    game_status_cv.notify_all();
++#endif
+     std::lock_guard<std::mutex> lock(current_game_mutex);
+     current_game.reset();
+ }
+@@ -710,7 +732,14 @@ void recomp::mods::set_mod_index(const std::string &mod_game_id, const std::stri
+ }
+ 
+ bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
++#if defined(__cpp_lib_atomic_wait) && __cpp_lib_atomic_wait >= 201907L
+     game_status.wait(GameStatus::None);
++#else
++    {
++        std::unique_lock<std::mutex> status_lock(game_status_mutex);
++        game_status_cv.wait(status_lock, [] { return game_status.load() != GameStatus::None; });
++    }
++#endif
+ 
+     switch (game_status.load()) {
+         // TODO refactor this to allow a project to specify what entrypoint function to run for a give game.

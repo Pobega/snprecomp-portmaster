@@ -1,0 +1,39 @@
+# Sin and Punishment Recompiled - Handheld Configuration
+# Tuned for Anbernic RG34XX SP / RGSP (720x480 3:2, Allwinner H700)
+
+[video]
+# Aspect ratio: "expand" (3:2 720x480 full screen) or "original" (4:3 pillarboxed)
+aspect_ratio = "expand"
+# Resolution scale: 2 (native 480p match for H700) or 1 (original 240p)
+resolution_scale = 2
+vsync = true
+target_fps = 60
+sharp_textures = false
+sharp_hud = true
+
+[audio]
+master_volume = 100
+music_volume = 100
+sfx_volume = 100
+
+[controls]
+# Scheme: "twin_stick" (Left Stick strafes, Right Stick aims) or "dpad_aim" (for stickless H700)
+scheme = "twin_stick"
+stick_sensitivity = 100.0
+deadzone = 0.15
+analog_aim = true
+rumble = true
+swap_sticks = false
+
+[cheats]
+unlock_options = false
+infinite_health = false
+infinite_time = false
+infinite_continues = false
+max_score = false
+invincible = false
+infinite_air_jumps = false
+
+[rom]
+# Preferred ROM region: "auto" (prefers English if present, else Japanese), "en", or "jp"
+preferred_region = "auto"

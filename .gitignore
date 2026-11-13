@@ -83,8 +83,21 @@ build-release-linux/
 __pycache__/
 
 # Extra build folders (e.g. build-android from a command-line Android build)
-build-*/
+build*/
 
 # Diagnostics: the interpolation log (SNP_INTERP_LOG=1) and its Android switch file
 snp_interp.log
 snp-interp-log
+
+# PortMaster & handheld artifacts
+portmaster/sinandpunishment/SnPRecompiled
+portmaster/sinandpunishment/log.txt
+portmaster/sinandpunishment/roms/*.z64
+portmaster/sinandpunishment/roms/*.n64
+portmaster/sinandpunishment/roms/*.v64
+portmaster/sinandpunishment/saves/*
+!portmaster/sinandpunishment/saves/.gitkeep
+*.ppm
+frame_*.png
+HANDOFF.md
+

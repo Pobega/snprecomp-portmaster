@@ -21,7 +21,9 @@
 #include <vector>
 
 #include "recomp.h"
+#ifndef SNP_BACKEND_GLES3
 #include "rt64_device_summary.h"
+#endif
 #ifdef _WIN32
 #include "SDL.h"
 #else
@@ -1698,6 +1700,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
     // menu). Where the reticle isn't moved, there's nothing to match and nothing changes.
     live_id = snp::mouse::live_reticle_id(rdram, live_x, live_y);
 
+#ifndef SNP_BACKEND_GLES3
     // A GPU without descriptor indexing whose driver refused every game shader (an older Mali,
     // issue 17) shows nothing in play: say why once, instead of a silent black screen. The game
     // carries on as before after OK.
@@ -1709,6 +1712,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
             "it, but the screen stays black.\n\nOlder Mali GPUs, like the Mali-G52, are known to lack it.";
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Sin and Punishment Recompiled", message.c_str(), nullptr);
     }
+#endif
     live_recent_count = (live_id != 0) ? snp::mouse::recent_reticle_positions(live_recent_x, live_recent_y, live_recent_size) : 0;
     live_bank = (live_bank + 1) % live_banks;
     live_entry = 0;
