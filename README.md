@@ -14,18 +14,19 @@ Unofficial, and not affiliated with the rights holders. **No game data is includ
 | **Stage Combat (`16:9` Widescreen)** | **In-Game Quick Settings (`3:2` Handheld)** |
 | ![Stage Combat (16:9)](docs/screenshots/gameplay_16x9.png) | ![Quick Settings (3:2)](docs/screenshots/quick_settings_3x2.png) |
 
-### Aspect Ratio Comparison (`Hor+` Widescreen vs Original)
+### Aspect Ratio Comparison (`Vert+` Square & `Hor+` Widescreen vs Original)
 
-In `Expand` mode, the 3D camera frustum widens dynamically to match any handheld panel (`3:2`, `16:9`, `16:10`, etc.) while anchoring 2D HUD elements (`SCORE`, `TIME`, `LIFE`) cleanly to the screen edges without stretching:
+In `Expand` mode, the 3D camera frustum adapts dynamically to any handheld panel — expanding vertically (`Vert+`) on square/tall screens (`1:1`, `5:4`) and widening horizontally (`Hor+`) on widescreen panels (`3:2`, `16:9`, `16:10`) — while scaling aiming reticle reach and anchoring 2D HUD elements (`SCORE`, `TIME`, `LIFE`, subtitles) cleanly to the screen edges without stretching:
 
-| `4:3` Original (`640x480`) | `3:2` Handheld Expand (`720x480`) | `16:9` Widescreen Expand (`854x480`) |
-| :---: | :---: | :---: |
-| ![4:3 Original](docs/screenshots/gameplay_4x3.png) | ![3:2 Handheld Expand](docs/screenshots/gameplay_3x2.png) | ![16:9 Widescreen Expand](docs/screenshots/gameplay_16x9.png) |
+| `1:1` Square Expand (`720x720`) | `4:3` Original (`640x480`) | `3:2` Handheld Expand (`720x480`) | `16:9` Widescreen Expand (`854x480`) |
+| :---: | :---: | :---: | :---: |
+| ![1:1 Square Expand](docs/screenshots/gameplay_1x1.png) | ![4:3 Original](docs/screenshots/gameplay_4x3.png) | ![3:2 Handheld Expand](docs/screenshots/gameplay_3x2.png) | ![16:9 Widescreen Expand](docs/screenshots/gameplay_16x9.png) |
 
 ## Highlights
 
 - **Static MIPS + RSP Recompilation**: Translates the original Nintendo 64 game code, dynamic stage overlays, and `n_aspMain` audio microcode ahead-of-time into native `aarch64` / `x86_64` code via [N64Recomp](https://github.com/N64Recomp/N64Recomp) and [N64ModernRuntime](https://github.com/N64Recomp/N64ModernRuntime).
-- **Custom OpenGL ES 3.0 `F3DEX2` Renderer**: Built for embedded handheld GPUs with no Vulkan requirement, running full-speed on **Allwinner H700 / Mali-G31 MP2** (Anbernic RG35XX / RG34XX / RGSP family), **PowerVR GE8300** (TrimUI Brick / Smart Pro), **RK3566 / Mali-G52**, and **Adreno** (`min_glibc = 2.30`).
+- **Custom OpenGL ES 3.0 `F3DEX2` Renderer**: Built for embedded handheld GPUs with no Vulkan requirement, running full-speed on **Allwinner H700 / Mali-G31 MP2** (Anbernic RG35XX / RG34XX / RGSP / RG CubeXX family), **PowerVR GE8300** (TrimUI Brick / Smart Pro), **RK3566 / Mali-G52** (Powkiddy RGB30), and **Adreno** (`min_glibc = 2.30`).
+- **Native `Vert+` & `Hor+` Multi-Aspect Support**: Full `Expand` support for `1:1` square panels (`720x720`), `3:2` (`720x480`), `16:9`, and `16:10` alongside `4:3 Original`, dynamically adjusting 3D frustum culling, vertical/horizontal reticle reach, cutscene letterbox bars, and edge-anchored gameplay HUD elements.
 - **Context-Aware Handheld Controls**:
   - Automatically detects analog stick count on first boot (`Stickless: Strafe + Shift` on stickless/1-stick devices, `Twin Stick` on 2-stick handhelds).
   - Automatically switches to standard D-Pad / Left Stick + `A` (Confirm) / `B` (Back) navigation across front-end menus, file select, name entry, cutscenes, and in-stage pause menus.
