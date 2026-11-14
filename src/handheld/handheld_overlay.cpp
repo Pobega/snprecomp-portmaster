@@ -15,6 +15,7 @@
 #include "gl_loader.h"
 #include "handheld_config.h"
 #include "handheld_font.h"
+#include "ra_client.h"
 #include "../gles3/gles3_renderer_context.h"
 #include "ultramodern/ultramodern.hpp"
 
@@ -24,7 +25,7 @@ namespace gl = snp::gles3::gl;
 
 namespace {
 
-constexpr int TOTAL_MENU_ROWS = 13;
+constexpr int TOTAL_MENU_ROWS = 15;
 constexpr float FONT_CHAR_WIDTH = 8.0f;
 constexpr float FONT_CHAR_HEIGHT = 8.0f;
 constexpr float SOLID_UV_U = 127.5f / 128.0f;
@@ -42,6 +43,8 @@ enum class MenuRow {
     VSync,
     Rumble,
     MasterVolume,
+    RetroAchievements,
+    SyncAchievements,
     SaveAndResume,
     SaveAndQuit,
 };
@@ -88,6 +91,8 @@ GLuint s_program = 0;
 GLuint s_vao = 0;
 GLuint s_vbo = 0;
 GLuint s_font_texture = 0;
+GLuint s_toast_badge_texture = 0;
+std::vector<uint8_t> s_last_badge_pixels;
 GLint s_loc_screen_size = -1;
 GLint s_loc_texture = -1;
 
@@ -320,6 +325,8 @@ std::string get_row_label(MenuRow row) {
     case MenuRow::VSync: return "VSync";
     case MenuRow::Rumble: return "Rumble";
     case MenuRow::MasterVolume: return "Master Volume";
+    case MenuRow::RetroAchievements: return "RetroAchievements";
+    case MenuRow::SyncAchievements: return "Sync Achievements";
     case MenuRow::SaveAndResume: return "[ Save & Resume ]";
     case MenuRow::SaveAndQuit: return "[ Save & Quit ]";
     }
@@ -380,6 +387,28 @@ std::string get_row_value(MenuRow row, const HandheldConfig& cfg) {
         return cfg.controls.rumble ? "On" : "Off";
     case MenuRow::MasterVolume:
         return std::to_string(cfg.audio.master_volume) + "%";
+    case MenuRow::RetroAchievements:
+        return ra_get_status_text();
+    case MenuRow::SyncAchievements: {
+        if (!ra_is_enabled()) {
+            return "Disabled";
+        }
+        if (ra_is_syncing()) {
+            return "Syncing...";
+        }
+        size_t pending = ra_get_pending_sync_count();
+        if (pending > 0) {
+            return std::to_string(pending) + " Pending (Press A)";
+        }
+        std::string status = ra_get_status_text();
+        if (status == "No Credentials") {
+            return "Not Signed In";
+        }
+        if (ra_is_offline_mode() || status == "Offline") {
+            return "Reconnect (Press A)";
+        }
+        return "Up to Date (Press A)";
+    }
     case MenuRow::SaveAndResume:
     case MenuRow::SaveAndQuit:
         return "";
@@ -455,6 +484,14 @@ void cycle_row_value(MenuRow row, bool forward) {
         cfg.audio.master_volume = std::clamp(cfg.audio.master_volume + delta, 0, 100);
         break;
     }
+    case MenuRow::RetroAchievements:
+        ra_set_enabled(!ra_is_enabled());
+        break;
+    case MenuRow::SyncAchievements:
+        if (ra_is_enabled() && ra_get_status_text() != "No Credentials") {
+            ra_sync_now();
+        }
+        break;
     case MenuRow::SaveAndResume:
         save_config();
         close_overlay();
@@ -471,8 +508,8 @@ void build_overlay_mesh(int win_w, int win_h) {
 
     add_solid_rect(0.0f, 0.0f, static_cast<float>(win_w), static_cast<float>(win_h), COLOR_BACKDROP);
 
-    float panel_w = 648.0f;
-    float panel_h = 444.0f;
+    float panel_w = std::min(648.0f, std::max(580.0f, static_cast<float>(win_w) - 16.0f));
+    float panel_h = std::min(444.0f, std::max(400.0f, static_cast<float>(win_h) - 16.0f));
     float panel_x0 = (static_cast<float>(win_w) - panel_w) * 0.5f;
     float panel_y0 = (static_cast<float>(win_h) - panel_h) * 0.5f;
     float panel_x1 = panel_x0 + panel_w;
@@ -586,11 +623,14 @@ void shutdown_overlay() {
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
     if (s_gl_initialized) {
         if (SDL_GL_GetCurrentContext() != nullptr) {
+            if (s_toast_badge_texture) gl::glDeleteTextures(1, &s_toast_badge_texture);
             if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
             if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
             if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
             if (s_program) gl::glDeleteProgram(s_program);
         }
+        s_toast_badge_texture = 0;
+        s_last_badge_pixels.clear();
         s_font_texture = 0;
         s_vbo = 0;
         s_vao = 0;
@@ -670,18 +710,14 @@ void update_overlay_input(bool up, bool down, bool left, bool right,
     }
 }
 
-void render_overlay(int win_w, int win_h) {
-    if (!s_overlay_open.load(std::memory_order_relaxed)) {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(s_overlay_mutex);
-
-    if (!s_gl_initialized) {
-        init_gl_resources();
-    }
-    if (!s_gl_initialized) {
-        return;
+void render_menu(int win_w, int win_h) {
+    static std::string s_last_ra_snapshot;
+    std::string ra_snapshot = ra_get_status_text() + "|" +
+                              (ra_is_syncing() ? "1" : "0") + "|" +
+                              (ra_is_offline_mode() ? "1" : "0");
+    if (ra_snapshot != s_last_ra_snapshot) {
+        s_last_ra_snapshot = std::move(ra_snapshot);
+        s_mesh_dirty = true;
     }
 
     if (win_w != s_last_win_w || win_h != s_last_win_h) {
@@ -730,6 +766,199 @@ void render_overlay(int win_w, int win_h) {
     gl::glBindVertexArray(0);
     gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
     gl::glUseProgram(0);
+}
+
+void render_toast_card(int win_w, int win_h) {
+    RaToastItem toast;
+    if (!ra_get_current_toast(toast)) {
+        return;
+    }
+
+    float elapsed = toast.elapsed_sec;
+    float duration = toast.duration_sec;
+
+    float alpha = 1.0f;
+    float x_slide = 0.0f;
+    constexpr float SLIDE_IN_DURATION = 0.35f;
+    constexpr float FADE_OUT_DURATION = 0.5f;
+
+    if (elapsed < SLIDE_IN_DURATION) {
+        float t = elapsed / SLIDE_IN_DURATION;
+        alpha = t;
+        x_slide = (1.0f - t) * -320.0f;
+    } else if (elapsed > duration - FADE_OUT_DURATION) {
+        float t = std::clamp((duration - elapsed) / FADE_OUT_DURATION, 0.0f, 1.0f);
+        alpha = t;
+        x_slide = (1.0f - t) * -40.0f;
+    }
+
+    float scale = std::clamp(static_cast<float>(win_h) / 480.0f, 0.75f, 1.5f);
+    float card_w = std::min(static_cast<float>(win_w) - 32.0f, 500.0f * scale);
+    float card_h = 64.0f * scale;
+    float card_x0 = 16.0f * scale + x_slide;
+    float card_y0 = static_cast<float>(win_h) - card_h - 16.0f * scale;
+    float card_x1 = card_x0 + card_w;
+    float card_y1 = card_y0 + card_h;
+
+    std::vector<OverlayVertex> toast_vertices;
+    std::vector<OverlayVertex> badge_vertices;
+
+    ColorRgba bg_color{0.06f, 0.08f, 0.12f, 0.94f * alpha};
+    ColorRgba border_color{0.95f, 0.78f, 0.20f, 0.95f * alpha};
+    ColorRgba bar_color{1.0f, 0.85f, 0.25f, 1.0f * alpha};
+    if (toast.accent_kind == 3) {
+        border_color = ColorRgba{0.85f, 0.30f, 0.25f, 0.95f * alpha};
+        bar_color = ColorRgba{1.0f, 0.35f, 0.30f, 1.0f * alpha};
+    } else if (toast.accent_kind == 1) {
+        border_color = ColorRgba{0.35f, 0.70f, 1.0f, 0.95f * alpha};
+        bar_color = ColorRgba{0.45f, 0.85f, 1.0f, 1.0f * alpha};
+    }
+
+    auto add_quad_to = [](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1,
+                          float u0, float v0, float u1, float v1, const ColorRgba& c) {
+        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
+        list.push_back({x1, y0, u1, v0, c.r, c.g, c.b, c.a});
+        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
+        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
+        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
+        list.push_back({x0, y1, u0, v1, c.r, c.g, c.b, c.a});
+    };
+
+    auto add_rect_to = [&](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1, const ColorRgba& c) {
+        add_quad_to(list, x0, y0, x1, y1, SOLID_UV_U, SOLID_UV_V, SOLID_UV_U, SOLID_UV_V, c);
+    };
+
+    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y1, bg_color);
+    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y0 + 1.5f, border_color);
+    add_rect_to(toast_vertices, card_x0, card_y1 - 1.5f, card_x1, card_y1, border_color);
+    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 1.5f, card_y1, border_color);
+    add_rect_to(toast_vertices, card_x1 - 1.5f, card_y0, card_x1, card_y1, border_color);
+    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 4.0f * scale, card_y1, bar_color);
+
+    float badge_size = 46.0f * scale;
+    float badge_x0 = card_x0 + 10.0f * scale;
+    float badge_y0 = card_y0 + (card_h - badge_size) * 0.5f;
+    float badge_x1 = badge_x0 + badge_size;
+    float badge_y1 = badge_y0 + badge_size;
+
+    bool has_badge = !toast.rgba_pixels.empty();
+    if (has_badge) {
+        ColorRgba badge_col{1.0f, 1.0f, 1.0f, alpha};
+        add_quad_to(badge_vertices, badge_x0, badge_y0, badge_x1, badge_y1, 0.0f, 0.0f, 1.0f, 1.0f, badge_col);
+    }
+
+    float text_x = badge_x1 + 10.0f * scale;
+    float crisp_scale = std::max(1.0f, std::floor(scale));
+
+    auto add_string_to = [&](std::vector<OverlayVertex>& list, float x, float y, float s, const std::string& str, const ColorRgba& c) {
+        float avail_w = (card_x1 - 8.0f * scale) - x;
+        size_t max_chars = avail_w > 0.0f ? static_cast<size_t>(avail_w / (FONT_CHAR_WIDTH * s)) : 0;
+        std::string clipped = str;
+        if (clipped.size() > max_chars) {
+            clipped = (max_chars > 3) ? (clipped.substr(0, max_chars - 3) + "...") : clipped.substr(0, max_chars);
+        }
+        float cx = x;
+        for (char ch : clipped) {
+            if (ch < 32 || ch > 126) ch = '?';
+            int glyph = ch - 32;
+            int col = glyph % 16;
+            int row = glyph / 16;
+            float u0 = (col * 8) / 128.0f;
+            float v0 = (row * 8) / 64.0f;
+            float u1 = (col * 8 + 8) / 128.0f;
+            float v1 = (row * 8 + 8) / 64.0f;
+            add_quad_to(list, cx, y, cx + FONT_CHAR_WIDTH * s, y + FONT_CHAR_HEIGHT * s, u0, v0, u1, v1, c);
+            cx += FONT_CHAR_WIDTH * s;
+        }
+    };
+
+    ColorRgba title_color = (toast.accent_kind == 0) ? ColorRgba{1.0f, 0.84f, 0.20f, alpha} : ColorRgba{0.45f, 0.85f, 1.0f, alpha};
+    ColorRgba sub_color{1.0f, 1.0f, 1.0f, alpha};
+    ColorRgba detail_color{0.75f, 0.80f, 0.88f, 0.90f * alpha};
+
+    add_string_to(toast_vertices, text_x, card_y0 + 10.0f * scale, crisp_scale, toast.title, title_color);
+    add_string_to(toast_vertices, text_x, card_y0 + 26.0f * scale, crisp_scale * 1.25f, toast.subtitle, sub_color);
+    if (!toast.detail.empty()) {
+        add_string_to(toast_vertices, text_x, card_y0 + 45.0f * scale, crisp_scale, toast.detail, detail_color);
+    }
+
+    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl::glViewport(0, 0, win_w, win_h);
+    gl::glDisable(GL_SCISSOR_TEST);
+    gl::glDisable(GL_DEPTH_TEST);
+    gl::glDepthMask(GL_FALSE);
+    gl::glDisable(GL_CULL_FACE);
+    gl::glEnable(GL_BLEND);
+    gl::glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    gl::glUseProgram(s_program);
+    gl::glUniform2f(s_loc_screen_size, static_cast<float>(win_w), static_cast<float>(win_h));
+    gl::glUniform1i(s_loc_texture, 0);
+
+    gl::glActiveTexture(GL_TEXTURE0);
+
+    if (!toast_vertices.empty()) {
+        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+        gl::glBufferData(GL_ARRAY_BUFFER, toast_vertices.size() * sizeof(OverlayVertex), toast_vertices.data(), GL_STREAM_DRAW);
+        gl::glBindTexture(GL_TEXTURE_2D, s_font_texture);
+        gl::glBindVertexArray(s_vao);
+        gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(toast_vertices.size()));
+    }
+
+    if (has_badge && !badge_vertices.empty()) {
+        if (s_toast_badge_texture == 0) {
+            gl::glGenTextures(1, &s_toast_badge_texture);
+            gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
+            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        } else {
+            gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
+        }
+
+        if (s_last_badge_pixels != toast.rgba_pixels) {
+            gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, toast.rgba_pixels.data());
+            s_last_badge_pixels = toast.rgba_pixels;
+        }
+
+        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+        gl::glBufferData(GL_ARRAY_BUFFER, badge_vertices.size() * sizeof(OverlayVertex), badge_vertices.data(), GL_STREAM_DRAW);
+        gl::glBindVertexArray(s_vao);
+        gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(badge_vertices.size()));
+    }
+
+    gl::glDisable(GL_BLEND);
+    gl::glDepthMask(GL_TRUE);
+    gl::glBindVertexArray(0);
+    gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
+    gl::glUseProgram(0);
+}
+
+void render_overlay(int win_w, int win_h) {
+    bool menu_open = s_overlay_open.load(std::memory_order_relaxed);
+    bool toasts_active = ra_has_active_toasts();
+
+    if (!menu_open && !toasts_active) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(s_overlay_mutex);
+
+    if (!s_gl_initialized) {
+        init_gl_resources();
+    }
+    if (!s_gl_initialized) {
+        return;
+    }
+
+    if (menu_open) {
+        render_menu(win_w, win_h);
+    }
+
+    if (toasts_active) {
+        render_toast_card(win_w, win_h);
+    }
 }
 
 } // namespace snp::handheld

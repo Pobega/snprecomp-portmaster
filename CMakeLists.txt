@@ -320,10 +320,26 @@ if (NOT SOURCES)
 endif()
 
 if (SNP_BACKEND_GLES3)
+    file(GLOB RCHEEVOS_SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/api/*.c
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/client/*.c
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/hash/*.c
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/runtime/*.c
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/util/*.c
+    )
+    add_library(rcheevos STATIC ${RCHEEVOS_SOURCES})
+    target_include_directories(rcheevos PUBLIC
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/include
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src
+    )
+    target_compile_definitions(rcheevos PUBLIC RC_CLIENT_SUPPORTS_HASH)
+
     target_include_directories(SnPRecompiled PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src/handheld
         ${CMAKE_SOURCE_DIR}/src/gles3
+        ${CMAKE_SOURCE_DIR}/lib/rcheevos/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/thirdparty/miniz
         ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/include
         ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/lib/tomlplusplus/include
         ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/ultramodern/include
@@ -540,6 +556,7 @@ if (SNP_BACKEND_GLES3)
         RecompiledFuncs
         librecomp
         ultramodern
+        rcheevos
         ${SNP_SDL2_TARGET}
         Threads::Threads
         ${CMAKE_DL_LIBS}

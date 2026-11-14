@@ -19,6 +19,7 @@
 #include "handheld_config.h"
 #include "handheld_input.h"
 #include "handheld_overlay.h"
+#include "ra_client.h"
 #include "rom_loader.h"
 
 #include "librecomp/game.hpp"
@@ -294,6 +295,7 @@ extern "C" uint32_t snp_ai_status() {
 extern "C" void recomp_run_ui_callbacks(uint8_t* rdram, recomp_context* ctx) {
     (void)ctx;
     snp_extras_frame(rdram);
+    snp::handheld::ra_do_frame(rdram);
 }
 
 extern "C" void recomp_run_ui_callbacks_recomp(uint8_t* rdram, recomp_context* ctx) {
@@ -396,7 +398,9 @@ int main(int argc, char** argv) {
     ultramodern::renderer::callbacks_t renderer_callbacks{
         .create_render_context = [](uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
             snp::gles3::set_overlay_render_callback(snp::handheld::render_overlay);
-            snp::gles3::set_overlay_active_callback(snp::handheld::is_overlay_open);
+            snp::gles3::set_overlay_active_callback([]() {
+                return snp::handheld::is_overlay_open() || snp::handheld::ra_has_active_toasts();
+            });
             snp::gles3::set_vsync_enabled(snp::handheld::get_config().video.vsync);
             return snp::gles3::create_renderer_context(rdram, window_handle, developer_mode);
         },
@@ -438,6 +442,8 @@ int main(int argc, char** argv) {
 
     start_quit_watchdog();
 
+    snp::handheld::ra_init();
+
     recomp::start({
         .argc = final_argc,
         .argv = final_argv.data(),
@@ -454,6 +460,7 @@ int main(int argc, char** argv) {
         .message_queue_control = {},
     });
 
+    snp::handheld::ra_shutdown();
     snp::handheld::shutdown_overlay();
     snp::handheld::shutdown_input();
     fflush(stdout);
