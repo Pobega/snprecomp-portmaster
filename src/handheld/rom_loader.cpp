@@ -53,7 +53,22 @@ std::vector<std::filesystem::path> get_candidate_search_dirs() {
     return search_dirs;
 }
 
+std::filesystem::path s_selected_rom_path;
+
+void store_selected_path(const std::filesystem::path& config_dir, const std::string& game_id, const std::filesystem::path& fallback_path) {
+    std::filesystem::path stored = config_dir / (game_id + ".z64");
+    if (std::filesystem::exists(stored)) {
+        s_selected_rom_path = stored;
+    } else {
+        s_selected_rom_path = fallback_path;
+    }
+}
+
 } // namespace
+
+std::filesystem::path get_selected_rom_path() {
+    return s_selected_rom_path;
+}
 
 std::string find_and_select_rom() {
     const std::filesystem::path config_dir = recomp::get_config_path();
@@ -75,9 +90,10 @@ std::string find_and_select_rom() {
     recomp::check_all_stored_roms();
 
     if (recomp::is_rom_valid(game_id_priority[0])) {
-        std::cout << "Using verified stored ROM ("
-                  << reinterpret_cast<const char*>(game_id_priority[0].c_str()) << ")\n";
-        return std::string(reinterpret_cast<const char*>(game_id_priority[0].c_str()));
+        std::string selected_id = reinterpret_cast<const char*>(game_id_priority[0].c_str());
+        std::cout << "Using verified stored ROM (" << selected_id << ")\n";
+        store_selected_path(config_dir, selected_id, {});
+        return selected_id;
     }
 
     std::vector<std::filesystem::path> candidate_dirs = get_candidate_search_dirs();
@@ -96,14 +112,16 @@ std::string find_and_select_rom() {
         for (const auto& raw_path : candidate_files) {
             auto err = recomp::select_rom(raw_path, game_id_priority[0]);
             if (err == recomp::RomValidationError::Good) {
-                std::cout << "Selected ROM: " << raw_path << " ("
-                          << reinterpret_cast<const char*>(game_id_priority[0].c_str()) << ")\n";
-                return std::string(reinterpret_cast<const char*>(game_id_priority[0].c_str()));
+                std::string selected_id = reinterpret_cast<const char*>(game_id_priority[0].c_str());
+                std::cout << "Selected ROM: " << raw_path << " (" << selected_id << ")\n";
+                store_selected_path(config_dir, selected_id, raw_path);
+                return selected_id;
             }
         }
-        std::cout << "Using verified stored ROM ("
-                  << reinterpret_cast<const char*>(game_id_priority[1].c_str()) << ")\n";
-        return std::string(reinterpret_cast<const char*>(game_id_priority[1].c_str()));
+        std::string selected_id = reinterpret_cast<const char*>(game_id_priority[1].c_str());
+        std::cout << "Using verified stored ROM (" << selected_id << ")\n";
+        store_selected_path(config_dir, selected_id, {});
+        return selected_id;
     }
 
     if (candidate_files.empty()) {
@@ -116,9 +134,10 @@ std::string find_and_select_rom() {
         for (const auto& game_id : game_id_priority) {
             auto err = recomp::select_rom(raw_path, game_id);
             if (err == recomp::RomValidationError::Good) {
-                std::cout << "Selected ROM: " << raw_path << " ("
-                          << reinterpret_cast<const char*>(game_id.c_str()) << ")\n";
-                return std::string(reinterpret_cast<const char*>(game_id.c_str()));
+                std::string selected_id = reinterpret_cast<const char*>(game_id.c_str());
+                std::cout << "Selected ROM: " << raw_path << " (" << selected_id << ")\n";
+                store_selected_path(config_dir, selected_id, raw_path);
+                return selected_id;
             }
         }
     }

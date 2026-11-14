@@ -109,7 +109,16 @@ void save_config(const std::string& config_path) {
         << "infinite_air_jumps = " << (g_config.cheats.infinite_air_jumps ? "true" : "false") << "\n\n"
         << "[rom]\n"
         << "# Preferred ROM region: \"auto\" (prefers English if present, else Japanese), \"en\", or \"jp\"\n"
-        << "preferred_region = \"" << g_config.rom.preferred_region << "\"\n";
+        << "preferred_region = \"" << g_config.rom.preferred_region << "\"\n\n"
+        << "[retroachievements]\n"
+        << "enabled = " << (g_config.retroachievements.enabled ? "true" : "false") << "\n"
+        << "import_system_credentials = " << (g_config.retroachievements.import_system_credentials ? "true" : "false") << "\n"
+        << "notifications = " << (g_config.retroachievements.notifications ? "true" : "false") << "\n"
+        << "username = \"" << g_config.retroachievements.username << "\"\n"
+        << "token = \"" << g_config.retroachievements.token << "\"\n";
+    if (!g_config.retroachievements.password.empty()) {
+        out << "password = \"" << g_config.retroachievements.password << "\"\n";
+    }
 }
 
 bool load_config(const std::string& config_path) {
@@ -123,34 +132,37 @@ bool load_config(const std::string& config_path) {
     try {
         toml::table tbl = toml::parse_file(config_path);
 
-        if (auto video = tbl["video"].as_table()) {
-            g_config.video.aspect_ratio = video->get("aspect_ratio")->value_or(ASPECT_RATIO_EXPAND);
-            g_config.video.resolution_scale = static_cast<int>(video->get("resolution_scale")->value_or(int64_t(DEFAULT_RESOLUTION_SCALE)));
-            g_config.video.vsync = video->get("vsync")->value_or(true);
-            g_config.video.target_fps = static_cast<int>(video->get("target_fps")->value_or(int64_t(DEFAULT_TARGET_FPS)));
-            g_config.video.sharp_textures = video->get("sharp_textures")->value_or(false);
-            g_config.video.sharp_hud = video->get("sharp_hud")->value_or(true);
+        if (tbl["video"].is_table()) {
+            auto video = tbl["video"];
+            g_config.video.aspect_ratio = video["aspect_ratio"].value_or(ASPECT_RATIO_EXPAND);
+            g_config.video.resolution_scale = static_cast<int>(video["resolution_scale"].value_or(int64_t(DEFAULT_RESOLUTION_SCALE)));
+            g_config.video.vsync = video["vsync"].value_or(true);
+            g_config.video.target_fps = static_cast<int>(video["target_fps"].value_or(int64_t(DEFAULT_TARGET_FPS)));
+            g_config.video.sharp_textures = video["sharp_textures"].value_or(false);
+            g_config.video.sharp_hud = video["sharp_hud"].value_or(true);
         }
 
-        if (auto audio = tbl["audio"].as_table()) {
-            g_config.audio.master_volume = static_cast<int>(audio->get("master_volume")->value_or(int64_t(DEFAULT_VOLUME)));
-            g_config.audio.music_volume = static_cast<int>(audio->get("music_volume")->value_or(int64_t(DEFAULT_VOLUME)));
-            g_config.audio.sfx_volume = static_cast<int>(audio->get("sfx_volume")->value_or(int64_t(DEFAULT_VOLUME)));
+        if (tbl["audio"].is_table()) {
+            auto audio = tbl["audio"];
+            g_config.audio.master_volume = static_cast<int>(audio["master_volume"].value_or(int64_t(DEFAULT_VOLUME)));
+            g_config.audio.music_volume = static_cast<int>(audio["music_volume"].value_or(int64_t(DEFAULT_VOLUME)));
+            g_config.audio.sfx_volume = static_cast<int>(audio["sfx_volume"].value_or(int64_t(DEFAULT_VOLUME)));
         }
 
-        if (auto controls = tbl["controls"].as_table()) {
-            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_AUTO);
+        if (tbl["controls"].is_table()) {
+            auto controls = tbl["controls"];
+            g_config.controls.scheme = controls["scheme"].value_or(CONTROL_SCHEME_AUTO);
             if (g_config.controls.scheme == CONTROL_SCHEME_AUTO) {
                 g_config.controls.scheme = resolve_default_control_scheme();
             }
-            g_config.controls.smart_lock_on = controls->get("smart_lock_on")->value_or(SMART_LOCK_AUTO);
-            g_config.controls.aim_curve = controls->get("aim_curve")->value_or(AIM_CURVE_S_CURVE);
-            g_config.controls.face_layout = controls->get("face_layout")->value_or(FACE_LAYOUT_NINTENDO);
-            g_config.controls.stick_sensitivity = static_cast<float>(controls->get("stick_sensitivity")->value_or(double(DEFAULT_STICK_SENSITIVITY)));
-            g_config.controls.deadzone = static_cast<float>(controls->get("deadzone")->value_or(double(DEFAULT_DEADZONE)));
-            g_config.controls.analog_aim = controls->get("analog_aim")->value_or(true);
-            g_config.controls.rumble = controls->get("rumble")->value_or(true);
-            g_config.controls.swap_sticks = controls->get("swap_sticks")->value_or(false);
+            g_config.controls.smart_lock_on = controls["smart_lock_on"].value_or(SMART_LOCK_AUTO);
+            g_config.controls.aim_curve = controls["aim_curve"].value_or(AIM_CURVE_S_CURVE);
+            g_config.controls.face_layout = controls["face_layout"].value_or(FACE_LAYOUT_NINTENDO);
+            g_config.controls.stick_sensitivity = static_cast<float>(controls["stick_sensitivity"].value_or(double(DEFAULT_STICK_SENSITIVITY)));
+            g_config.controls.deadzone = static_cast<float>(controls["deadzone"].value_or(double(DEFAULT_DEADZONE)));
+            g_config.controls.analog_aim = controls["analog_aim"].value_or(true);
+            g_config.controls.rumble = controls["rumble"].value_or(true);
+            g_config.controls.swap_sticks = controls["swap_sticks"].value_or(false);
 
             if (g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE_SHIFT &&
                 g_config.controls.scheme != CONTROL_SCHEME_BUMPER_STRAFE &&
@@ -176,18 +188,29 @@ bool load_config(const std::string& config_path) {
             snp::config::set_stick_sensitivity(g_config.controls.stick_sensitivity);
         }
 
-        if (auto cheats = tbl["cheats"].as_table()) {
-            g_config.cheats.unlock_options = cheats->get("unlock_options")->value_or(false);
-            g_config.cheats.infinite_health = cheats->get("infinite_health")->value_or(false);
-            g_config.cheats.infinite_time = cheats->get("infinite_time")->value_or(false);
-            g_config.cheats.infinite_continues = cheats->get("infinite_continues")->value_or(false);
-            g_config.cheats.max_score = cheats->get("max_score")->value_or(false);
-            g_config.cheats.invincible = cheats->get("invincible")->value_or(false);
-            g_config.cheats.infinite_air_jumps = cheats->get("infinite_air_jumps")->value_or(false);
+        if (tbl["cheats"].is_table()) {
+            auto cheats = tbl["cheats"];
+            g_config.cheats.unlock_options = cheats["unlock_options"].value_or(false);
+            g_config.cheats.infinite_health = cheats["infinite_health"].value_or(false);
+            g_config.cheats.infinite_time = cheats["infinite_time"].value_or(false);
+            g_config.cheats.infinite_continues = cheats["infinite_continues"].value_or(false);
+            g_config.cheats.max_score = cheats["max_score"].value_or(false);
+            g_config.cheats.invincible = cheats["invincible"].value_or(false);
+            g_config.cheats.infinite_air_jumps = cheats["infinite_air_jumps"].value_or(false);
         }
 
-        if (auto rom = tbl["rom"].as_table()) {
-            g_config.rom.preferred_region = rom->get("preferred_region")->value_or(ROM_PREFERRED_AUTO);
+        if (tbl["rom"].is_table()) {
+            g_config.rom.preferred_region = tbl["rom"]["preferred_region"].value_or(ROM_PREFERRED_AUTO);
+        }
+
+        if (tbl["retroachievements"].is_table()) {
+            auto ra = tbl["retroachievements"];
+            g_config.retroachievements.enabled = ra["enabled"].value_or(true);
+            g_config.retroachievements.import_system_credentials = ra["import_system_credentials"].value_or(true);
+            g_config.retroachievements.notifications = ra["notifications"].value_or(true);
+            g_config.retroachievements.username = ra["username"].value_or(std::string(""));
+            g_config.retroachievements.token = ra["token"].value_or(std::string(""));
+            g_config.retroachievements.password = ra["password"].value_or(std::string(""));
         }
     } catch (const std::exception& e) {
         std::cerr << "Warning: Error parsing " << config_path << ": " << e.what() << ", using defaults\n";

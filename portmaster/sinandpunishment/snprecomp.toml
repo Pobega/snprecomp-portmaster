@@ -49,3 +49,11 @@ infinite_air_jumps = false
 [rom]
 # Preferred ROM region: "auto" (prefers English if present, else Japanese), "en", or "jp"
 preferred_region = "auto"
+
+[retroachievements]
+# Softcore RetroAchievements with automatic NextUI (minuisettings.txt) & RetroArch (retroarch.cfg) import
+enabled = true
+import_system_credentials = true
+notifications = true
+username = ""
+token = ""

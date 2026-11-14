@@ -11,4 +11,6 @@ namespace snp::handheld {
 // Returns empty string if no valid ROM was found.
 std::string find_and_select_rom();
 
+std::filesystem::path get_selected_rom_path();
+
 } // namespace snp::handheld

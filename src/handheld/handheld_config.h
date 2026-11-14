@@ -78,12 +78,22 @@ struct RomSettings {
     std::string preferred_region = ROM_PREFERRED_AUTO;
 };
 
+struct RetroAchievementsConfig {
+    bool enabled = true;
+    bool import_system_credentials = true;
+    bool notifications = true;
+    std::string username;
+    std::string token;
+    std::string password;
+};
+
 struct HandheldConfig {
     VideoSettings video;
     AudioSettings audio;
     ControlsSettings controls;
     CheatsSettings cheats;
     RomSettings rom;
+    RetroAchievementsConfig retroachievements;
 };
 
 bool load_config(const std::string& config_path = DEFAULT_CONFIG_FILE);
