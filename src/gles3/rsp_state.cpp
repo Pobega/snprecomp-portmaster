@@ -10,6 +10,7 @@ namespace {
     constexpr float N64_WIDTH = 320.0f;
     constexpr float N64_HEIGHT = 240.0f;
     constexpr float N64_HALF_WIDTH = 160.0f;
+    constexpr float N64_HALF_HEIGHT = 120.0f;
     constexpr float SUBPIXEL_SCALE = 4.0f;
     constexpr float UV_FIXED_SCALE = 32.0f;
     constexpr float DSDX_1CYCLE_SCALE = 1024.0f;
@@ -128,7 +129,8 @@ void RspState::reset() {
     current_tex_scale_t_ = 1.0f;
     current_tex_offset_s_ = 0.0f;
     current_tex_offset_t_ = 0.0f;
-    rect_align_origin_ = G_EX_ORIGIN_NONE;
+    rect_align_origin_x_ = G_EX_ORIGIN_NONE;
+    rect_align_origin_y_ = G_EX_ORIGIN_NONE;
     rect_align_offset_x_ = 0;
     rect_align_offset_y_ = 0;
     while (!scissor_stack_.empty()) scissor_stack_.pop();
@@ -139,10 +141,14 @@ void RspState::set_window_size(int win_w, int win_h, bool expand_aspect) {
     win_w_ = win_w;
     win_h_ = win_h;
     expand_aspect_ = expand_aspect;
-    if (expand_aspect && win_h > 0) {
-        widescreen_scale_ = (static_cast<float>(win_w) / static_cast<float>(win_h)) / (4.0f / 3.0f);
+    if (expand_aspect && win_h > 0 && win_w > 0) {
+        constexpr float kFourByThree = 4.0f / 3.0f;
+        float win_ratio = static_cast<float>(win_w) / static_cast<float>(win_h);
+        widescreen_scale_ = std::max(1.0f, win_ratio / kFourByThree);
+        tallscreen_scale_ = std::max(1.0f, kFourByThree / win_ratio);
     } else {
         widescreen_scale_ = 1.0f;
+        tallscreen_scale_ = 1.0f;
     }
 }
 
@@ -419,19 +425,46 @@ float RspState::compute_rect_shift_x() const {
         return 0.0f;
     }
     float offset_px = static_cast<float>(rect_align_offset_x_) / SUBPIXEL_SCALE;
-    if (rect_align_origin_ == G_EX_ORIGIN_LEFT) {
+    if (rect_align_origin_x_ == G_EX_ORIGIN_LEFT) {
         return -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f) + offset_px;
     }
-    if (rect_align_origin_ == G_EX_ORIGIN_RIGHT) {
+    if (rect_align_origin_x_ == G_EX_ORIGIN_RIGHT) {
         return N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f) + offset_px;
     }
     return offset_px;
 }
 
+float RspState::compute_rect_shift_y() const {
+    if (!expand_aspect_ || tallscreen_scale_ <= 1.0f) {
+        return 0.0f;
+    }
+    float offset_py = static_cast<float>(rect_align_offset_y_) / SUBPIXEL_SCALE;
+    if (rect_align_origin_y_ == G_EX_ORIGIN_TOP) {
+        return -N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f) + offset_py;
+    }
+    if (rect_align_origin_y_ == G_EX_ORIGIN_BOTTOM) {
+        return N64_HEIGHT + N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f) + offset_py;
+    }
+    return offset_py;
+}
+
 void RspState::apply_gl_scissor_for_rect(const FboEntry& fbo, const ScissorRect& scissor) const {
-    float scale_y = static_cast<float>(fbo.height) / N64_HEIGHT;
-    int sy = static_cast<int>((N64_HEIGHT - static_cast<float>(scissor.y + scissor.height)) * scale_y);
-    int sh = static_cast<int>(static_cast<float>(scissor.height) * scale_y);
+    int sy = 0;
+    int sy_top = fbo.height;
+    if (expand_aspect_ && tallscreen_scale_ > 1.0f) {
+        auto map_y_gl = [&](int n64_y) -> int {
+            float norm = 0.5f - ((static_cast<float>(n64_y) - N64_HALF_HEIGHT) / (N64_HEIGHT * tallscreen_scale_));
+            return static_cast<int>(std::lround(norm * static_cast<float>(fbo.height)));
+        };
+        sy_top = (scissor.y <= 0) ? fbo.height : map_y_gl(scissor.y);
+        int bottom_n64 = scissor.y + scissor.height;
+        sy = (bottom_n64 >= static_cast<int>(N64_HEIGHT)) ? 0 : map_y_gl(bottom_n64);
+    } else {
+        float scale_y = static_cast<float>(fbo.height) / N64_HEIGHT;
+        sy = static_cast<int>((N64_HEIGHT - static_cast<float>(scissor.y + scissor.height)) * scale_y);
+        sy_top = static_cast<int>((N64_HEIGHT - static_cast<float>(scissor.y)) * scale_y);
+    }
+    int sh = std::max(1, sy_top - sy);
 
     int sx = 0;
     int sx_right = fbo.width;
@@ -499,6 +532,12 @@ void RspState::flush_batch() {
         proj.m[1][0] /= widescreen_scale_;
         proj.m[2][0] /= widescreen_scale_;
         proj.m[3][0] /= widescreen_scale_;
+    }
+    if (expand_aspect_ && tallscreen_scale_ > 1.0f) {
+        proj.m[0][1] /= tallscreen_scale_;
+        proj.m[1][1] /= tallscreen_scale_;
+        proj.m[2][1] /= tallscreen_scale_;
+        proj.m[3][1] /= tallscreen_scale_;
     }
 
     float alpha_threshold = cutout_alpha ? ALPHA_THRESHOLD_CUTOUT : ALPHA_THRESHOLD_COMPARE;
@@ -761,8 +800,11 @@ void RspState::draw_tex_rect(uint32_t tile, uint32_t ulx, uint32_t uly, uint32_t
     float y1 = (static_cast<float>(lry) / SUBPIXEL_SCALE) + inclusive_pad;
 
     float shift_x = compute_rect_shift_x();
+    float shift_y = compute_rect_shift_y();
     x0 += shift_x;
     x1 += shift_x;
+    y0 += shift_y;
+    y1 += shift_y;
 
     float dsdx_divisor = is_copy ? DSDX_COPY_SCALE : DSDX_1CYCLE_SCALE;
     float s0 = static_cast<float>(static_cast<int16_t>(uls)) / UV_FIXED_SCALE;
@@ -793,6 +835,11 @@ void RspState::draw_tex_rect(uint32_t tile, uint32_t ulx, uint32_t uly, uint32_t
         if (expand_aspect_ && widescreen_scale_ > 1.0f && (lrx - ulx >= 319 * 4)) {
             x0 = -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
             x1 = N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
+        }
+        if (expand_aspect_ && tallscreen_scale_ > 1.0f && (lry - uly >= 239 * 4)) {
+            float extra_h = N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f);
+            y0 = -extra_h;
+            y1 = N64_HEIGHT + extra_h;
         }
         norm_u_scale = 1.0f / N64_WIDTH;
         norm_v_scale = -1.0f / N64_HEIGHT;
@@ -856,7 +903,8 @@ void RspState::draw_fill_rect(uint32_t ulx, uint32_t uly, uint32_t lrx, uint32_t
         b = ((c16 >> 1) & 0x1Fu) / 31.0f;
         a = (c16 & 1u) ? 1.0f : 0.0f;
 
-        if (rect_align_origin_ == G_EX_ORIGIN_NONE && rect_align_offset_x_ == 0 &&
+        if (rect_align_origin_x_ == G_EX_ORIGIN_NONE && rect_align_origin_y_ == G_EX_ORIGIN_NONE &&
+            rect_align_offset_x_ == 0 && rect_align_offset_y_ == 0 &&
             ulx == 0 && uly == 0 && lrx >= 319 * 4 && lry >= 239 * 4) {
             submit_render_pass();
             FboEntry* current_fbo = fbo_manager_.get_current_fbo();
@@ -875,12 +923,29 @@ void RspState::draw_fill_rect(uint32_t ulx, uint32_t uly, uint32_t lrx, uint32_t
     }
 
     float shift_x = compute_rect_shift_x();
+    float shift_y = compute_rect_shift_y();
     x0 += shift_x;
     x1 += shift_x;
+    y0 += shift_y;
+    y1 += shift_y;
 
-    if (expand_aspect_ && widescreen_scale_ > 1.0f && rect_align_origin_ == G_EX_ORIGIN_NONE && ulx == 0 && lrx >= 319 * 4) {
+    if (expand_aspect_ && widescreen_scale_ > 1.0f && rect_align_origin_x_ == G_EX_ORIGIN_NONE && ulx == 0 && lrx >= 319 * 4) {
         x0 = -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
         x1 = N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
+    }
+    if (expand_aspect_ && tallscreen_scale_ > 1.0f && rect_align_origin_y_ == G_EX_ORIGIN_NONE) {
+        float extra_h = N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f);
+        if (uly == 0 && lry >= 239 * 4 && ulx == 0 && lrx >= 319 * 4) {
+            y0 = -extra_h;
+            y1 = N64_HEIGHT + extra_h;
+        } else if (ulx == 0 && lrx >= 319 * 4 && y0 <= 1.0f && y1 <= 64.0f) {
+            y0 = -extra_h;
+        } else if (ulx == 0 && lrx >= 319 * 4 && y1 >= 239.0f && y0 >= 176.0f) {
+            y1 = N64_HEIGHT + extra_h;
+        } else if ((lrx - ulx <= 8 * 4) && (lry - uly >= 200 * 4)) {
+            y0 = -extra_h;
+            y1 = N64_HEIGHT + extra_h;
+        }
     }
 
     Matrix4 old_proj = projection_matrix_;
@@ -941,7 +1006,12 @@ void RspState::ex_pop_scissor() {
 }
 
 void RspState::ex_set_rect_align(uint32_t origin, int32_t offset_x, int32_t offset_y) {
-    rect_align_origin_ = origin;
+    ex_set_rect_align(origin, origin, offset_x, offset_y);
+}
+
+void RspState::ex_set_rect_align(uint32_t origin_x, uint32_t origin_y, int32_t offset_x, int32_t offset_y) {
+    rect_align_origin_x_ = origin_x;
+    rect_align_origin_y_ = origin_y;
     rect_align_offset_x_ = offset_x;
     rect_align_offset_y_ = offset_y;
 }

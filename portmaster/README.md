@@ -6,7 +6,7 @@ To play, copy your legally obtained Nintendo 64 cartridge dump (`.z64`, `.n64`, 
 
 On first boot, PortMaster verifies and normalizes your ROM, applies any optional translation patch, reconstructs the game binary from the clean-room ROM-keyed `snp.patch`, and caches the verified ROM for zero-write instant fast boot on subsequent launches.
 
-First boot automatically selects `Stickless: Strafe + Shift` on stickless/single-stick handhelds and `Twin Stick` on dual-stick handhelds. You can press `Select` or `Menu` at any time during gameplay to open the Quick Settings overlay and customize control schemes, aiming curves, sensitivity, and graphics options.
+First boot automatically selects `Stickless: Strafe + Shift` on stickless/single-stick handhelds and `Twin Stick` on dual-stick handhelds. Both `Hor+` widescreen (`3:2`, `16:9`, `16:10`) and `Vert+` square/tallscreen (`1:1` `720x720` RGB30 / RG CubeXX, `5:4`) aspect ratios are natively supported alongside `4:3 Original`, dynamically expanding 3D field-of-view, scissor boxes, and reticle reach without stretching or letterboxing. You can press `Select` or `Menu` at any time during gameplay to open the Quick Settings overlay and customize aspect ratios, control schemes, aiming curves, sensitivity, and graphics options.
 
 ## Controls
 

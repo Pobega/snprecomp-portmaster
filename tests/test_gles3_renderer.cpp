@@ -10,6 +10,7 @@
 #include "combiner_shader_cache.h"
 #include "rdram_access.h"
 #include "n64_gbi.h"
+#include "snp_config.h"
 
 // Stubs for ultramodern functions required by the renderer context
 namespace ultramodern::renderer {
@@ -512,6 +513,127 @@ int main() {
         }
 
         std::printf("[Test] View * Proj widescreen column 0 scale across all 4 rows verified\n");
+    }
+
+    // 720x720 (1:1) Vert+ Tallscreen tests
+    {
+        assert(snp::get_tall_hud_mode() == snp::TallHudMode::Edge);
+        snp::set_tall_hud_mode(snp::TallHudMode::Center);
+        assert(snp::get_tall_hud_mode() == snp::TallHudMode::Center);
+        snp::set_tall_hud_mode(snp::TallHudMode::Edge);
+
+        snp::set_tallscreen_scale(1.0f);
+        assert(snp::get_tallscreen_scale() == 1.0f);
+        assert(snp_cull_height_scale() == 1.0f);
+
+        uint32_t bits_4x3_pos = snp_reticle_vlimit_bits(1);
+        uint32_t bits_4x3_neg = snp_reticle_vlimit_bits(-1);
+        float limit_4x3_pos = 0.0f, limit_4x3_neg = 0.0f;
+        std::memcpy(&limit_4x3_pos, &bits_4x3_pos, sizeof(float));
+        std::memcpy(&limit_4x3_neg, &bits_4x3_neg, sizeof(float));
+        assert(std::abs(limit_4x3_pos - 104.0f) < 1e-4f);
+        assert(std::abs(limit_4x3_neg - (-104.0f)) < 1e-4f);
+
+        constexpr float kTallScale1x1 = 4.0f / 3.0f;
+        snp::set_tallscreen_scale(kTallScale1x1);
+        assert(std::abs(snp::get_tallscreen_scale() - kTallScale1x1) < 1e-5f);
+        assert(std::abs(snp_cull_height_scale() - kTallScale1x1) < 1e-5f);
+
+        uint32_t bits_1x1_pos = snp_reticle_vlimit_bits(1);
+        uint32_t bits_1x1_neg = snp_reticle_vlimit_bits(-1);
+        float limit_1x1_pos = 0.0f, limit_1x1_neg = 0.0f;
+        std::memcpy(&limit_1x1_pos, &bits_1x1_pos, sizeof(float));
+        std::memcpy(&limit_1x1_neg, &bits_1x1_neg, sizeof(float));
+        assert(std::abs(limit_1x1_pos - 144.0f) < 1e-4f);
+        assert(std::abs(limit_1x1_neg - (-144.0f)) < 1e-4f);
+        snp::set_tallscreen_scale(1.0f);
+
+        std::printf("[Test] Tallscreen cull height scale and reticle vlimit bits verified\n");
+
+        snp::gles3::TmemTextureCache tmem;
+        snp::gles3::CombinerShaderCache shaders;
+        snp::gles3::FboManager fbos;
+        snp::gles3::RspState rsp(tmem, shaders, fbos);
+
+        rsp.set_window_size(720, 720, true);
+        assert(std::abs(rsp.get_tallscreen_scale() - (4.0f / 3.0f)) < 1e-5f);
+        assert(std::abs(rsp.get_widescreen_scale() - 1.0f) < 1e-5f);
+
+        fbos.bind_fbo(0x00500000u, 720, 720, rdram.data());
+
+        float test_proj[4][4]{
+            { 1.5f, 0.4f, 0.0f, 0.0f },
+            { 0.3f, 2.0f, 0.0f, 0.0f },
+            { 0.1f, 0.2f, 1.0f, 0.0f },
+            { 0.0f, -1.0f, 0.0f, 1.0f }
+        };
+        write_matrix_s15_16(rdram.data(), 0x0000A000u, test_proj);
+        rsp.load_matrix(rdram.data(), 0x0000A000u, snp::gles3::G_MTX_PROJECTION | snp::gles3::G_MTX_LOAD);
+
+        float identity[4][4]{
+            { 1.0f, 0.0f, 0.0f, 0.0f },
+            { 0.0f, 1.0f, 0.0f, 0.0f },
+            { 0.0f, 0.0f, 1.0f, 0.0f },
+            { 0.0f, 0.0f, 0.0f, 1.0f }
+        };
+        write_matrix_s15_16(rdram.data(), 0x0000A040u, identity);
+        rsp.load_matrix(rdram.data(), 0x0000A040u, snp::gles3::G_MTX_MODELVIEW | snp::gles3::G_MTX_LOAD);
+
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A100u + 0, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A100u + 2, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A100u + 4, 0);
+        snp::gles3::write_rdram_u32(rdram.data(), 0x0000A100u + 12, 0xFFFFFFFFu);
+
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A110u + 0, 10);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A110u + 2, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A110u + 4, 0);
+        snp::gles3::write_rdram_u32(rdram.data(), 0x0000A110u + 12, 0xFFFFFFFFu);
+
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A120u + 0, 0);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A120u + 2, 10);
+        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A120u + 4, 0);
+        snp::gles3::write_rdram_u32(rdram.data(), 0x0000A120u + 12, 0xFFFFFFFFu);
+
+        rsp.load_vertices(rdram.data(), 0x0000A100u, 3, 0);
+        rsp.draw_tri1(0, 1, 2);
+        rsp.flush_batch();
+        rsp.submit_render_pass();
+        assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
+
+        for (int row = 0; row < 4; ++row) {
+            float unscaled_x = test_proj[row][0];
+            assert(std::abs(unscaled_x - test_proj[row][0]) < 1e-5f);
+
+            float unscaled_y = test_proj[row][1];
+            float scaled_y = unscaled_y / kTallScale1x1;
+            assert(std::abs(scaled_y * kTallScale1x1 - unscaled_y) < 1e-5f);
+        }
+        std::printf("[Test] View * Proj tallscreen column 1 scale across all 4 rows verified\n");
+
+        rsp.set_scissor(0, 0, 320 * 4, 240 * 4);
+        rsp.draw_fill_rect(0, 0, 10 * 4, 10 * 4);
+        rsp.flush_batch();
+        rsp.submit_render_pass();
+        GLint box[4]{};
+        snp::gles3::gl::glGetIntegerv(GL_SCISSOR_BOX, box);
+        assert(box[0] == 0 && box[1] == 0 && box[2] == 720 && box[3] == 720);
+
+        rsp.set_scissor(32 * 4, 30 * 4, 288 * 4, 210 * 4);
+        rsp.draw_fill_rect(32 * 4, 30 * 4, 40 * 4, 40 * 4);
+        rsp.flush_batch();
+        rsp.submit_render_pass();
+        snp::gles3::gl::glGetIntegerv(GL_SCISSOR_BOX, box);
+        assert(box[1] == 158 && box[3] == 405);
+
+        rsp.set_scissor(0, 0, 320 * 4, 240 * 4);
+        rsp.draw_fill_rect(0, 0, 320 * 4, 40 * 4);
+        rsp.draw_fill_rect(0, 200 * 4, 320 * 4, 240 * 4);
+        rsp.draw_fill_rect(0, 0, 320 * 4, 240 * 4);
+        rsp.flush_batch();
+        rsp.submit_render_pass();
+        assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
+
+        std::printf("[Test] 720x720 1:1 Vert+ tallscreen scissor mapping and letterbox extension verified\n");
     }
 
     // FBO feedback texture selection excluding current_fbo_addr_ and 0x0011B760

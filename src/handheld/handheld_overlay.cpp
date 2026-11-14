@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include <SDL2/SDL.h>
 #include "gl_loader.h"
 #include "handheld_config.h"
 #include "handheld_font.h"
@@ -347,8 +348,30 @@ std::string get_row_value(MenuRow row, const HandheldConfig& cfg) {
         return (cfg.controls.face_layout == FACE_LAYOUT_POSITIONAL) ? "Positional (Swap)" : "Nintendo (B/A/Y/X)";
     case MenuRow::SwapSticks:
         return cfg.controls.swap_sticks ? "On" : "Off";
-    case MenuRow::AspectRatio:
-        return (cfg.video.aspect_ratio == ASPECT_RATIO_EXPAND) ? "3:2 Expand" : "4:3 Original";
+    case MenuRow::AspectRatio: {
+        if (cfg.video.aspect_ratio != ASPECT_RATIO_EXPAND) {
+            return "4:3 Original";
+        }
+        SDL_Window* window = SDL_GL_GetCurrentWindow();
+        if (window != nullptr) {
+            int width = 0, height = 0;
+            SDL_GetWindowSize(window, &width, &height);
+            if (width > 0 && height > 0) {
+                float aspect = static_cast<float>(width) / static_cast<float>(height);
+                constexpr float kTolerance = 0.05f;
+                auto matches = [aspect](float target) {
+                    return std::abs(aspect - target) <= kTolerance;
+                };
+                if (matches(1.0f)) return "1:1 Expand";
+                if (matches(5.0f / 4.0f)) return "5:4 Expand";
+                if (matches(4.0f / 3.0f)) return "4:3 Expand";
+                if (matches(3.0f / 2.0f)) return "3:2 Expand";
+                if (matches(16.0f / 10.0f)) return "16:10 Expand";
+                if (matches(16.0f / 9.0f)) return "16:9 Expand";
+            }
+        }
+        return "Full Expand";
+    }
     case MenuRow::Resolution:
         return (cfg.video.resolution_scale >= 2) ? "2x (480p)" : "1x (240p)";
     case MenuRow::VSync:

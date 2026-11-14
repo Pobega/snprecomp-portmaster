@@ -92,6 +92,9 @@ public:
     void ex_push_scissor();
     void ex_pop_scissor();
     void ex_set_rect_align(uint32_t origin, int32_t offset_x, int32_t offset_y);
+    void ex_set_rect_align(uint32_t origin_x, uint32_t origin_y, int32_t offset_x, int32_t offset_y);
+    float get_widescreen_scale() const { return widescreen_scale_; }
+    float get_tallscreen_scale() const { return tallscreen_scale_; }
 
     void flush_batch();
     void submit_render_pass();
@@ -155,6 +158,7 @@ private:
     Matrix4 read_matrix(const uint8_t* rdram, uint32_t phys_addr) const;
     void apply_lighting(RspVertex& v, float nx, float ny, float nz) const;
     float compute_rect_shift_x() const;
+    float compute_rect_shift_y() const;
     void apply_gl_scissor(const FboEntry& fbo) const;
     void apply_gl_scissor_for_rect(const FboEntry& fbo, const ScissorRect& scissor) const;
     void ensure_batch_state(GLuint tex_id, float tex_scale_s, float tex_scale_t, float tex_offset_s, float tex_offset_t);
@@ -168,6 +172,7 @@ private:
     int win_h_ = 480;
     bool expand_aspect_ = false;
     float widescreen_scale_ = 1.0f;
+    float tallscreen_scale_ = 1.0f;
 
     Matrix4 modelview_stack_[MODELVIEW_STACK_DEPTH];
     int modelview_top_ = 0;
@@ -204,7 +209,8 @@ private:
     ScissorRect current_scissor_{ 0, 0, 320, 240 };
     std::stack<ScissorRect> scissor_stack_;
 
-    uint32_t rect_align_origin_ = G_EX_ORIGIN_NONE;
+    uint32_t rect_align_origin_x_ = G_EX_ORIGIN_NONE;
+    uint32_t rect_align_origin_y_ = G_EX_ORIGIN_NONE;
     int32_t rect_align_offset_x_ = 0;
     int32_t rect_align_offset_y_ = 0;
 

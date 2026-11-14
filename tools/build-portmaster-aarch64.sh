@@ -63,9 +63,30 @@ elif [ -x "$REPO_ROOT/build-host/lib/N64ModernRuntime/N64Recomp/RSPRecomp" ]; th
 fi
 
 # Generate RecompiledFuncs from ROM if present
-if [ -f "$ROM_JP" ] && [ -n "$N64RECOMP_BIN" ] && [ ! -f "$REPO_ROOT/RecompiledFuncs/funcs.h" ]; then
-    echo "--> Running host N64Recomp on Japanese build ROM..."
-    $TOOLBOX_CMD "$N64RECOMP_BIN" snp.jp.toml
+ROM_EN="$REPO_ROOT/snp.n64.en.fan.z64"
+RECOMP_NEEDED=0
+if [ ! -f "$REPO_ROOT/RecompiledFuncs/funcs.h" ]; then
+    RECOMP_NEEDED=1
+elif [ -f "$REPO_ROOT/snp.jp.toml" ] && [ "$REPO_ROOT/snp.jp.toml" -nt "$REPO_ROOT/RecompiledFuncs/funcs.h" ]; then
+    RECOMP_NEEDED=1
+fi
+
+if [ "$RECOMP_NEEDED" = "1" ] && [ -n "$N64RECOMP_BIN" ]; then
+    CLEANUP_ROM_JP=0
+    if [ ! -f "$ROM_JP" ] && [ -f "$ROM_EN" ] && [ -f "$REPO_ROOT/tools/prepare_rom_for_recomp.py" ]; then
+        echo "--> Generating Japanese ROM from English ROM for recompiler..."
+        python3 "$REPO_ROOT/tools/prepare_rom_for_recomp.py" "$ROM_EN"
+        CLEANUP_ROM_JP=1
+    fi
+
+    if [ -f "$ROM_JP" ]; then
+        echo "--> Running host N64Recomp on Japanese build ROM..."
+        $TOOLBOX_CMD "$N64RECOMP_BIN" snp.jp.toml
+        touch "$REPO_ROOT/RecompiledFuncs/funcs.h"
+        if [ "$CLEANUP_ROM_JP" = "1" ]; then
+            rm -f "$ROM_JP"
+        fi
+    fi
 fi
 
 # Generate RSP audio microcode if present
@@ -160,7 +181,7 @@ echo "--> Generating PortMaster GLES3 patch..."
 mkdir -p "$REPO_ROOT/portmaster/patches"
 git add -N tools/snp_patch.cpp tools/snp_patch_lib.h tests/test_snp_patch.cpp 2>/dev/null || true
 git diff 6e76c24c84e6fc65faeae89e8e75d7fac92aba1f -- \
-    CMakeLists.txt include/ lib-patches/ src/ tests/ \
+    CMakeLists.txt include/ lib-patches/ src/ tests/ snp.jp.toml \
     tools/file_to_c.c tools/file_to_c.py tools/prepare_rom_for_recomp.py \
     tools/snp_patch.cpp tools/snp_patch_lib.h \
     > "$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch"

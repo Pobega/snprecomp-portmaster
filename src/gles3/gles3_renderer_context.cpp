@@ -489,13 +489,14 @@ void Gles3RendererContext::execute_display_list(uint32_t start_phys_addr) {
             case G_EX: {
                 uint32_t subcmd = w0 & 0xFFu;
                 if (subcmd == G_EX_SETRECTALIGN) {
-                    uint32_t origin = w1 & 0xFFFu;
+                    uint32_t origin_x = w1 & 0xFFFu;
+                    uint32_t origin_y = (w1 >> 12) & 0xFFFu;
                     uint32_t next_w0 = read_rdram_u32(rdram_, pc);
                     uint32_t next_w1 = read_rdram_u32(rdram_, pc + 4);
                     pc += 8;
                     int32_t off_x = static_cast<int32_t>(static_cast<int16_t>(next_w0 >> 16));
                     int32_t off_y = static_cast<int32_t>(static_cast<int16_t>(next_w1 >> 16));
-                    rsp_state_->ex_set_rect_align(origin, off_x, off_y);
+                    rsp_state_->ex_set_rect_align(origin_x, origin_y, off_x, off_y);
                 } else if (subcmd == G_EX_PUSHSCISSOR) {
                     rsp_state_->ex_push_scissor();
                 } else if (subcmd == G_EX_POPSCISSOR) {

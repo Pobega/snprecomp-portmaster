@@ -205,17 +205,22 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 void update_gfx(void*) {
     snp::handheld::poll_input();
 
+    constexpr float kFourByThree = 4.0f / 3.0f;
     float widescreen_scale = 1.0f;
+    float tallscreen_scale = 1.0f;
     if (ultramodern::renderer::get_graphics_config().ar_option == ultramodern::renderer::AspectRatio::Expand) {
         int width = 0, height = 0;
         if (s_window != nullptr) {
             SDL_GetWindowSize(s_window, &width, &height);
             if (width > 0 && height > 0) {
-                widescreen_scale = std::max(1.0f, (static_cast<float>(width) / static_cast<float>(height)) / (4.0f / 3.0f));
+                float aspect = static_cast<float>(width) / static_cast<float>(height);
+                widescreen_scale = std::max(1.0f, aspect / kFourByThree);
+                tallscreen_scale = std::max(1.0f, kFourByThree / aspect);
             }
         }
     }
     snp::set_widescreen_scale(widescreen_scale);
+    snp::set_tallscreen_scale(tallscreen_scale);
 }
 
 std::string get_game_thread_name(const OSThread* t) {

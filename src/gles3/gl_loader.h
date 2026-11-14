@@ -7,6 +7,7 @@ namespace snp::gles3 {
 
 namespace gl {
     using PFNGLGETERRORPROC = GLenum (*)(void);
+    using PFNGLGETINTEGERVPROC = void (*)(GLenum pname, GLint* data);
     using PFNGLGETSTRINGPROC = const GLubyte* (*)(GLenum name);
     using PFNGLVIEWPORTPROC = void (*)(GLint x, GLint y, GLsizei width, GLsizei height);
     using PFNGLSCISSORPROC = void (*)(GLint x, GLint y, GLsizei width, GLsizei height);
@@ -77,6 +78,7 @@ namespace gl {
     using PFNGLPIXELSTOREIPROC = void (*)(GLenum pname, GLint param);
 
     extern PFNGLGETERRORPROC glGetError;
+    extern PFNGLGETINTEGERVPROC glGetIntegerv;
     extern PFNGLGETSTRINGPROC glGetString;
     extern PFNGLVIEWPORTPROC glViewport;
     extern PFNGLSCISSORPROC glScissor;

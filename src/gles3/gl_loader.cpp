@@ -5,6 +5,7 @@ namespace snp::gles3 {
 
 namespace gl {
     PFNGLGETERRORPROC glGetError = nullptr;
+    PFNGLGETINTEGERVPROC glGetIntegerv = nullptr;
     PFNGLGETSTRINGPROC glGetString = nullptr;
     PFNGLVIEWPORTPROC glViewport = nullptr;
     PFNGLSCISSORPROC glScissor = nullptr;
@@ -90,6 +91,7 @@ namespace {
 bool init_gl_loader() {
     bool ok = true;
     ok &= load_gl_func(gl::glGetError, "glGetError");
+    ok &= load_gl_func(gl::glGetIntegerv, "glGetIntegerv");
     ok &= load_gl_func(gl::glGetString, "glGetString");
     ok &= load_gl_func(gl::glViewport, "glViewport");
     ok &= load_gl_func(gl::glScissor, "glScissor");

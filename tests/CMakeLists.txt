@@ -15,10 +15,14 @@ add_executable(test_gles3_renderer
     ../src/gles3/fbo_manager.cpp
     ../src/gles3/rsp_state.cpp
     ../src/gles3/gles3_renderer_context.cpp
+    ../src/game/widescreen.cpp
 )
 
 target_include_directories(test_gles3_renderer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/gles3
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/N64Recomp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/librecomp/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include/ultramodern
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty

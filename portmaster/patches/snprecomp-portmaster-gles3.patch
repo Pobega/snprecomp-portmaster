@@ -449,7 +449,7 @@ index 3c54509..e1e1ea2 100644
 +endif()
 +
 diff --git a/include/snp_config.h b/include/snp_config.h
-index d8ccb8d..ba05114 100644
+index d8ccb8d..14112b9 100644
 --- a/include/snp_config.h
 +++ b/include/snp_config.h
 @@ -35,6 +35,7 @@ namespace snp::config {
@@ -460,6 +460,37 @@ index d8ccb8d..ba05114 100644
  
      // Screen Filter and Bloom at the end of the Graphics tab (RT64's
      // ScreenFilter and Bloom values; src/main/extras_config.cpp).
+@@ -73,12 +74,27 @@ namespace snp::config {
+     bool get_option(Option option);
+ }
+ 
+-// Widescreen (src/game/widescreen.cpp): how much wider than 4:3 RT64 is
+-// drawing full-width 3D views -- the window aspect / (4/3) in Expand mode,
+-// 1 otherwise. Updated by the frontend every frame.
++// Widescreen & Tallscreen (src/game/widescreen.cpp): scale factors for views
++// wider or taller than 4:3 in Expand mode. Updated by the frontend every frame.
+ namespace snp {
+     void set_widescreen_scale(float scale);
+     float get_widescreen_scale();
++    void set_tallscreen_scale(float scale);
++    float get_tallscreen_scale();
++
++    enum class TallHudMode {
++        Center,
++        Edge
++    };
++    void set_tall_hud_mode(TallHudMode mode);
++    TallHudMode get_tall_hud_mode();
++}
++
++extern "C" {
++    float snp_cull_width_scale(void);
++    float snp_cull_height_scale(void);
++    uint32_t snp_reticle_limit_bits(int32_t side);
++    uint32_t snp_reticle_vlimit_bits(int32_t side);
+ }
+ 
+ #endif
 diff --git a/lib-patches/N64ModernRuntime/0003-gcc10-atomic-wait-fallback.patch b/lib-patches/N64ModernRuntime/0003-gcc10-atomic-wait-fallback.patch
 new file mode 100644
 index 0000000..80849c9
@@ -540,8 +571,41 @@ index 0000000..80849c9
 + 
 +     switch (game_status.load()) {
 +         // TODO refactor this to allow a project to specify what entrypoint function to run for a give game.
+diff --git a/snp.jp.toml b/snp.jp.toml
+index 6d380e4..5587288 100644
+--- a/snp.jp.toml
++++ b/snp.jp.toml
+@@ -63,6 +63,11 @@ text = "{ extern uint32_t snp_ai_length(void); ctx->r2 = (gpr)(int32_t)snp_ai_le
+ # object's radius). In Expand the picture is wider than the 4:3 view those
+ # limits describe, so scenery at the sides wasn't drawn; the left/right limit
+ # is scaled by the widescreen scale (src/game/widescreen.cpp).
++[[patches.hook]]
++func = "func_80029070"
++before_vram = 0x8002913C
++text = "{ extern float snp_cull_height_scale(void); ctx->f0.fl *= snp_cull_height_scale(); } // snp: tallscreen culling"
++
+ [[patches.hook]]
+ func = "func_80029070"
+ before_vram = 0x8002917C
+@@ -173,6 +178,16 @@ func = "func_800AB924"
+ before_vram = 0x800ABB9C
+ text = "{ extern uint32_t snp_reticle_limit_bits(int32_t); ctx->r3 = (int32_t)snp_reticle_limit_bits(1); } // snp: reticle reach"
+ 
++[[patches.hook]]
++func = "func_800AB924"
++before_vram = 0x800ABBC0
++text = "{ extern uint32_t snp_reticle_vlimit_bits(int32_t); ctx->r3 = (int32_t)snp_reticle_vlimit_bits(1); } // snp: reticle vertical reach"
++
++[[patches.hook]]
++func = "func_800AB924"
++before_vram = 0x800ABBE8
++text = "{ extern uint32_t snp_reticle_vlimit_bits(int32_t); ctx->r3 = (int32_t)snp_reticle_vlimit_bits(-1); } // snp: reticle vertical reach"
++
+ # --- Mouse aiming and analog aim ----------------------------------------------
+ # Before the reticle's velocity is added to its position ($s2 + 0x28, + 0x2C)
+ # the mouse can move it (src/main/mouse.cpp).
 diff --git a/src/game/display_list.cpp b/src/game/display_list.cpp
-index b08120a..7d021b9 100644
+index b08120a..85a62eb 100644
 --- a/src/game/display_list.cpp
 +++ b/src/game/display_list.cpp
 @@ -21,7 +21,9 @@
@@ -554,7 +618,191 @@ index b08120a..7d021b9 100644
  #ifdef _WIN32
  #include "SDL.h"
  #else
-@@ -1698,6 +1700,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+@@ -123,7 +125,8 @@ namespace {
+             uint32_t word = (uint32_t)MEM_W(off, (gpr)(int32_t)src);
+             if (off % 16 == 0) {
+                 int16_t x = (int16_t)(word >> 16);
+-                word = ((uint32_t)(uint16_t)(x * 4) << 16) | (word & 0xFFFF);
++                int16_t y = (int16_t)(word & 0xFFFF);
++                word = ((uint32_t)(uint16_t)(x * 4) << 16) | (uint16_t)(y * 4);
+             }
+             MEM_W(off, (gpr)(int32_t)dst) = (int32_t)word;
+         }
+@@ -976,7 +979,9 @@ namespace {
+     constexpr uint32_t hud_element_bottom = 80 * 4;
+     constexpr int32_t hud_margin = 16 * 4;
+     constexpr int32_t right_origin_shift = -320 * 4; // RT64 adds the width to right-anchored coordinates
++    constexpr int32_t bottom_origin_shift = -240 * 4;
+     constexpr uint32_t origin_left = 0x0, origin_right = 0x400, origin_none = 0x800;
++    constexpr uint32_t origin_top = 0x0, origin_bottom = 0x400;
+     bool in_hud = false;
+     // The front-end menus draw with the same projection, and the OPT. menu's
+     // top row is in the band: no anchoring there.
+@@ -1012,7 +1017,7 @@ namespace {
+     }
+ 
+     // addr: a G_TEXRECT (3 commands) or G_FILLRECT (1 command).
+-    void anchor_rect(uint8_t* rdram, uint32_t addr, uint32_t words, uint32_t origin, int32_t offset) {
++    void anchor_rect(uint8_t* rdram, uint32_t addr, uint32_t words, uint32_t origin_x, uint32_t origin_y, int32_t offset_x, int32_t offset_y) {
+         if (hud_entry >= hud_entries) {
+             return;
+         }
+@@ -1025,8 +1030,8 @@ namespace {
+         cmd(0x64000017, 0);          // gEXPushScissor
+         cmd(0x64000005, (origin_left << 2) | (origin_right << 14)); // gEXSetScissor: the whole window
+         cmd(0, 240 * 4);
+-        cmd(0x64000006, origin | (origin << 12)); // gEXSetRectAlign
+-        cmd((uint32_t)(uint16_t)offset << 16, (uint32_t)(uint16_t)offset << 16);
++        cmd(0x64000006, origin_x | (origin_y << 12)); // gEXSetRectAlign
++        cmd((uint32_t)(uint16_t)offset_x << 16, (uint32_t)(uint16_t)offset_y << 16);
+         for (uint32_t i = 0; i < words; i++) {
+             cmd((uint32_t)MEM_W(0, (gpr)(int32_t)(addr + i * 8)), (uint32_t)MEM_W(4, (gpr)(int32_t)(addr + i * 8)));
+         }
+@@ -1043,23 +1048,26 @@ namespace {
+         }
+     }
+ 
+-    // A prefix that clears only the strips beside the 4:3 picture (where the
+-    // N64 shows nothing) to fill (black, or a fog colour), then branches to
+-    // the game's list: in Expand the scenery doesn't always reach past the
+-    // 4:3 edge (gaps in a far skyline), and the game never clears its
+-    // framebuffer, so the strips kept old frames. The 4:3 picture is left as
+-    // the game draws it: rows the scenery misses there keep the last frames
+-    // as on the N64 (the grass's gaps at the bottom), and the motion blur
+-    // draws over the last frame.
++    void anchor_rect(uint8_t* rdram, uint32_t addr, uint32_t words, uint32_t origin, int32_t offset) {
++        anchor_rect(rdram, addr, words, origin, origin_none, offset, 0);
++    }
++
++    // A prefix that clears the side strips (widescreen) and/or top/bottom strips (tallscreen),
++    // then branches to the game's list.
+     uint32_t side_clear_prefix(uint8_t* rdram, uint32_t dl, uint32_t fill) {
+         uint32_t prefix = prefix_area + prefix_slot * prefix_bytes;
+         prefix_slot = (prefix_slot + 1) % prefix_slots;
+         uint32_t commands[prefix_commands][2];
+         uint32_t n = 0;
+         auto cmd = [&](uint32_t a, uint32_t b) { commands[n][0] = a; commands[n][1] = b; n++; };
+-        // Each strip's width in 4:3 units (RT64 widens the picture by the
+-        // window's aspect over 4:3), and a pixel more.
+-        uint32_t strip = std::min<uint32_t>((uint32_t)(160.0f * (snp::get_widescreen_scale() - 1.0f) * 4.0f) + 4, 320 * 4);
++
++        float ws = snp::get_widescreen_scale();
++        float ts = snp::get_tallscreen_scale();
++        bool widen = ws > 1.0f;
++        bool heighten = ts > 1.0f;
++        uint32_t strip_w = widen ? std::min<uint32_t>(static_cast<uint32_t>(160.0f * (ws - 1.0f) * 4.0f) + 4, 320 * 4) : 0;
++        uint32_t strip_h = heighten ? std::min<uint32_t>(static_cast<uint32_t>(120.0f * (ts - 1.0f) * 4.0f) + 4, 240 * 4) : 0;
++
+         cmd(0xE0525464, 0x10000064); // gEXEnable
+         cmd(0xE3000A01, 0x00300000); // cycle type: fill
+         cmd(0xF7000000, fill);
+@@ -1071,12 +1079,24 @@ namespace {
+                 continue;
+             }
+             cmd(cimgs[i][0], cimgs[i][1]);
+-            cmd(0x64000006, origin_left | (origin_left << 12)); // gEXSetRectAlign: from the left edge
+-            cmd(0, 0);
+-            cmd((G_FILLRECT << 24) | ((strip & 0xFFF) << 12) | (239 * 4), 0);
+-            cmd(0x64000006, origin_right | (origin_right << 12)); // from the right edge
+-            cmd((uint32_t)(uint16_t)right_origin_shift << 16, (uint32_t)(uint16_t)right_origin_shift << 16);
+-            cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (239 * 4), ((320 * 4 - strip) & 0xFFF) << 12);
++            if (widen) {
++                cmd(0x64000006, origin_left | (origin_none << 12)); // gEXSetRectAlign: from the left edge
++                cmd(0, 0);
++                cmd((G_FILLRECT << 24) | ((strip_w & 0xFFF) << 12) | (239 * 4), 0);
++                cmd(0x64000006, origin_right | (origin_none << 12)); // from the right edge
++                cmd(static_cast<uint32_t>(static_cast<uint16_t>(right_origin_shift)) << 16, 0);
++                cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (239 * 4), ((320 * 4 - strip_w) & 0xFFF) << 12);
++            }
++            if (heighten) {
++                // Top horizontal strip: [-extra_h, 0], x: 0..320
++                cmd(0x64000006, origin_none | (origin_top << 12));
++                cmd(0, 0);
++                cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (strip_h & 0xFFF), 0);
++                // Bottom horizontal strip: [240, 240 + extra_h], x: 0..320
++                cmd(0x64000006, origin_none | (origin_bottom << 12));
++                cmd(0, static_cast<uint32_t>(static_cast<uint16_t>(bottom_origin_shift)) << 16);
++                cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (239 * 4), (240 * 4 - strip_h) & 0xFFF);
++            }
+         }
+         cmd(0x64000006, origin_none | (origin_none << 12)); // back to unanchored
+         cmd(0, 0);
+@@ -1112,6 +1132,10 @@ namespace {
+         if (r.words != 1 || r.lry - r.uly < 200 * 4 || r.lrx - r.ulx > 8 * 4) {
+             return;
+         }
++        if (snp::get_tallscreen_scale() > 1.0f) {
++            anchor_rect(rdram, r.addr, 1, origin_none, origin_none, (r.ulx >= 640 * 4) ? -1024 * 4 : 0, 0);
++            return;
++        }
+         if (r.ulx >= 640 * 4) {
+             anchor_rect(rdram, r.addr, 1, origin_none, -1024 * 4);
+         }
+@@ -1169,12 +1193,15 @@ namespace {
+         const float size = std::clamp((240.0f * 4 - (B - T)) / ((240.0f - 64.0f) * 4), 0.0f, 1.0f);
+         const float side = std::clamp(((L + R) / 2.0f - 160.0f * 4) / (64.0f * 4), -1.0f, 1.0f);
+         const int32_t offset = (int32_t)std::lround(extra * size * side);
++        bool tall_edge = (snp::get_tallscreen_scale() > 1.0f) &&
++                         (snp::get_tall_hud_mode() == snp::TallHudMode::Edge);
+         for (uint32_t i = 0; i < n; i++) {
+             const HudRect& r = fill_run[i];
+             framed[i] = r.ulx + slack >= L && r.lrx <= R + slack && r.uly + slack >= T && r.lry <= B + slack &&
+                 (r.lry - r.uly <= thin || r.lrx - r.ulx <= thin);
+             if (framed[i]) {
+-                anchor_rect(rdram, r.addr, r.words, origin_none, offset);
++                uint32_t box_origin_y = tall_edge ? origin_top : origin_none;
++                anchor_rect(rdram, r.addr, r.words, origin_none, box_origin_y, offset, 0);
+             }
+         }
+         return true;
+@@ -1265,6 +1292,8 @@ namespace {
+                 place_crosshair_line(rdram, fill_run[i]);
+             }
+         }
++        bool tall_edge = (snp::get_tallscreen_scale() > 1.0f) &&
++                         (snp::get_tall_hud_mode() == snp::TallHudMode::Edge);
+         for (uint32_t i = 0; i < n; i++) {
+             if (framed[i] || find(i) != i) {
+                 continue;
+@@ -1278,14 +1307,33 @@ namespace {
+                     lry = std::max(lry, fill_run[j].lry);
+                 }
+             }
+-            uint32_t origin;
+-            int32_t offset;
+-            if (!hud_origin(ulx, uly, lrx, lry, origin, offset)) {
++            uint32_t origin_x = origin_none;
++            int32_t offset_x = 0;
++            bool x_anchored = hud_origin(ulx, uly, lrx, lry, origin_x, offset_x);
++
++            uint32_t origin_y = origin_none;
++            int32_t offset_y = 0;
++            bool y_anchored = false;
++
++            if (tall_edge) {
++                if (uly < hud_band_bottom && lry < hud_element_bottom) {
++                    origin_y = origin_top;
++                    offset_y = 0;
++                    y_anchored = true;
++                } else if (uly >= 180 * 4 && lry <= 240 * 4) {
++                    origin_y = origin_bottom;
++                    offset_y = bottom_origin_shift;
++                    y_anchored = true;
++                }
++            }
++
++            if (!x_anchored && !y_anchored) {
+                 continue;
+             }
++
+             for (uint32_t j = 0; j < n; j++) {
+                 if (find(j) == i) {
+-                    anchor_rect(rdram, fill_run[j].addr, fill_run[j].words, origin, offset);
++                    anchor_rect(rdram, fill_run[j].addr, fill_run[j].words, origin_x, origin_y, offset_x, offset_y);
+                 }
+             }
+         }
+@@ -1698,6 +1746,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
      // menu). Where the reticle isn't moved, there's nothing to match and nothing changes.
      live_id = snp::mouse::live_reticle_id(rdram, live_x, live_y);
  
@@ -562,7 +810,7 @@ index b08120a..7d021b9 100644
      // A GPU without descriptor indexing whose driver refused every game shader (an older Mali,
      // issue 17) shows nothing in play: say why once, instead of a silent black screen. The game
      // carries on as before after OK.
-@@ -1709,6 +1712,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+@@ -1709,6 +1758,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
              "it, but the screen stays black.\n\nOlder Mali GPUs, like the Mali-G52, are known to lack it.";
          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Sin and Punishment Recompiled", message.c_str(), nullptr);
      }
@@ -570,6 +818,59 @@ index b08120a..7d021b9 100644
      live_recent_count = (live_id != 0) ? snp::mouse::recent_reticle_positions(live_recent_x, live_recent_y, live_recent_size) : 0;
      live_bank = (live_bank + 1) % live_banks;
      live_entry = 0;
+@@ -1721,13 +1771,15 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+     }
+     pending_filter = 0;
+     bool widen = snp::get_widescreen_scale() > 1.0f;
++    bool heighten = snp::get_tallscreen_scale() > 1.0f;
++    bool expanded = widen || heighten;
+     interp_bank = (interp_bank + 1) % interp_banks;
+     interp_entry = 0;
+     snp::interp_new_frame();
+     if (log_frame) {
+         static const auto start = std::chrono::steady_clock::now();
+         double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+-        printf("[DL] ---- frame %d at %.1f s, display list %08X%s\n", frame - 1, t, dl, widen ? " (widened)" : "");
++        printf("[DL] ---- frame %d at %.1f s, display list %08X%s\n", frame - 1, t, dl, expanded ? " (expanded)" : "");
+     }
+     for (uint32_t& s : segments) {
+         s = 0;
+@@ -1752,7 +1804,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+     instance_tags.clear();
+     modelview_top = 0;
+     modelview[0] = identity_matrix();
+-    walk(rdram, dl, 0, widen, true);
++    walk(rdram, dl, 0, expanded, true);
+     end_fill_run(rdram);
+     align_crosshair_lines(rdram);
+     number_tagged_instances(rdram);
+@@ -1760,21 +1812,21 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+     // inset keep the wide picture (the game never clears them): the first
+     // frames clear every color image they draw to, enough for all three
+     // framebuffers.
+-    static bool was_widened = false;
++    static bool was_expanded = false;
+     static int clear_after_switch = 0;
+-    if (was_widened && !widen) {
++    if (was_expanded && !expanded) {
+         clear_after_switch = 6;
+     }
+-    was_widened = widen;
++    was_expanded = expanded;
+     bool clear_all = clear_after_switch > 0;
+     if (clear_all) {
+         clear_after_switch--;
+     }
+     if (first_cimg_w0 != 0) {
+-        if ((widen && starts_with_picture) || clear_all) {
++        if ((expanded && starts_with_picture) || clear_all) {
+             MEM_W(0x30, task) = (int32_t)clear_prefix(rdram, dl, clear_all);
+         }
+-        else if (widen && cimg_count > 0) {
++        else if (expanded && cimg_count > 0) {
+             // The fog colour the frame's scenery starts with (black if none):
+             // the far scenery fades into it, and it shows where the scenery
+             // doesn't reach the strips (past the edge of 2-2's sea in the
 diff --git a/src/game/extras.cpp b/src/game/extras.cpp
 index 8bb7088..79940bd 100644
 --- a/src/game/extras.cpp
@@ -665,6 +966,101 @@ index 9f84828..1d256c5 100644
 +    // to run before restoring the original priority.
 +    osSetThreadPri(rdram, 0, 0);
 +    osSetThreadPri(rdram, 0, pri);
+ }
+diff --git a/src/game/widescreen.cpp b/src/game/widescreen.cpp
+index 323ed50..3128b12 100644
+--- a/src/game/widescreen.cpp
++++ b/src/game/widescreen.cpp
+@@ -1,35 +1,82 @@
+-// Widescreen state shared with the game fixes. RT64's Expand mode draws the
+-// wider view itself; the game's culling at the screen edges, the reticle's
+-// reach and the display list fixes read the scale from here.
++// Widescreen & tallscreen state shared with the game fixes.
++#include <algorithm>
+ #include <atomic>
+ #include <cstdint>
++#include <cstdlib>
+ #include <cstring>
+ 
+ #include "snp_config.h"
+ 
+ namespace {
+-    std::atomic<float> widescreen_scale{ 1.0f };
++    constexpr float kDefaultScale = 1.0f;
++    constexpr float kHalfWidth = 160.0f;
++    constexpr float kHalfHeight = 120.0f;
++    constexpr float kReticleMargin = 16.0f;
++
++    std::atomic<float> widescreen_scale{ kDefaultScale };
++    std::atomic<float> tallscreen_scale{ kDefaultScale };
++
++    snp::TallHudMode init_tall_hud_mode() {
++        const char* env = std::getenv("SNP_TALL_HUD");
++        if (env != nullptr && std::strcmp(env, "center") == 0) {
++            return snp::TallHudMode::Center;
++        }
++        return snp::TallHudMode::Edge;
++    }
++
++    std::atomic<snp::TallHudMode> tall_hud_mode{ init_tall_hud_mode() };
+ }
+ 
+ void snp::set_widescreen_scale(float scale) {
+-    widescreen_scale.store(scale, std::memory_order_relaxed);
++    widescreen_scale.store(std::max(kDefaultScale, scale), std::memory_order_relaxed);
+ }
+ 
+ float snp::get_widescreen_scale() {
+     return widescreen_scale.load(std::memory_order_relaxed);
+ }
+ 
++void snp::set_tallscreen_scale(float scale) {
++    tallscreen_scale.store(std::max(kDefaultScale, scale), std::memory_order_relaxed);
++}
++
++float snp::get_tallscreen_scale() {
++    return tallscreen_scale.load(std::memory_order_relaxed);
++}
++
++void snp::set_tall_hud_mode(snp::TallHudMode mode) {
++    tall_hud_mode.store(mode, std::memory_order_relaxed);
++}
++
++snp::TallHudMode snp::get_tall_hud_mode() {
++    return tall_hud_mode.load(std::memory_order_relaxed);
++}
++
+ // func_80029070's left/right visibility limit (snp.jp.toml): wider in Expand.
+ extern "C" float snp_cull_width_scale() {
+     return snp::get_widescreen_scale();
+ }
+ 
++// func_80029070's top/bottom visibility limit (snp.jp.toml): taller in Vert+ tallscreen.
++extern "C" float snp_cull_height_scale() {
++    return snp::get_tallscreen_scale();
++}
++
+ // func_800AB924's left (side -1) and right (side 1) limits for the reticle's
+ // offset from the screen centre (snp.jp.toml), as float bits: 16 short of the
+ // screen's edge, 144 at 4:3.
+ extern "C" uint32_t snp_reticle_limit_bits(int32_t side) {
+-    float limit = side * (160.0f * snp::get_widescreen_scale() - 16.0f);
+-    uint32_t bits;
+-    memcpy(&bits, &limit, sizeof(bits));
++    float limit = static_cast<float>(side) * (kHalfWidth * snp::get_widescreen_scale() - kReticleMargin);
++    uint32_t bits = 0;
++    std::memcpy(&bits, &limit, sizeof(bits));
++    return bits;
++}
++
++// func_800AB924's top (side 1) and bottom (side -1) limits for the reticle's
++// vertical offset from the screen centre (snp.jp.toml), as float bits:
++// 16 short of the screen's edge, 104 at 4:3, 144 at 1:1.
++extern "C" uint32_t snp_reticle_vlimit_bits(int32_t side) {
++    float limit = static_cast<float>(side) * (kHalfHeight * snp::get_tallscreen_scale() - kReticleMargin);
++    uint32_t bits = 0;
++    std::memcpy(&bits, &limit, sizeof(bits));
+     return bits;
  }
 diff --git a/src/gles3/combiner_shader_cache.cpp b/src/gles3/combiner_shader_cache.cpp
 new file mode 100644
@@ -1425,10 +1821,10 @@ index 0000000..de70edb
 +} // namespace snp::gles3
 diff --git a/src/gles3/gl_loader.cpp b/src/gles3/gl_loader.cpp
 new file mode 100644
-index 0000000..7b4bfb3
+index 0000000..49543c9
 --- /dev/null
 +++ b/src/gles3/gl_loader.cpp
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,166 @@
 +#include "gl_loader.h"
 +#include <cstdio>
 +
@@ -1436,6 +1832,7 @@ index 0000000..7b4bfb3
 +
 +namespace gl {
 +    PFNGLGETERRORPROC glGetError = nullptr;
++    PFNGLGETINTEGERVPROC glGetIntegerv = nullptr;
 +    PFNGLGETSTRINGPROC glGetString = nullptr;
 +    PFNGLVIEWPORTPROC glViewport = nullptr;
 +    PFNGLSCISSORPROC glScissor = nullptr;
@@ -1521,6 +1918,7 @@ index 0000000..7b4bfb3
 +bool init_gl_loader() {
 +    bool ok = true;
 +    ok &= load_gl_func(gl::glGetError, "glGetError");
++    ok &= load_gl_func(gl::glGetIntegerv, "glGetIntegerv");
 +    ok &= load_gl_func(gl::glGetString, "glGetString");
 +    ok &= load_gl_func(gl::glViewport, "glViewport");
 +    ok &= load_gl_func(gl::glScissor, "glScissor");
@@ -1595,10 +1993,10 @@ index 0000000..7b4bfb3
 +} // namespace snp::gles3
 diff --git a/src/gles3/gl_loader.h b/src/gles3/gl_loader.h
 new file mode 100644
-index 0000000..1636c78
+index 0000000..e2e5aab
 --- /dev/null
 +++ b/src/gles3/gl_loader.h
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,154 @@
 +#pragma once
 +
 +#include <GLES3/gl3.h>
@@ -1608,6 +2006,7 @@ index 0000000..1636c78
 +
 +namespace gl {
 +    using PFNGLGETERRORPROC = GLenum (*)(void);
++    using PFNGLGETINTEGERVPROC = void (*)(GLenum pname, GLint* data);
 +    using PFNGLGETSTRINGPROC = const GLubyte* (*)(GLenum name);
 +    using PFNGLVIEWPORTPROC = void (*)(GLint x, GLint y, GLsizei width, GLsizei height);
 +    using PFNGLSCISSORPROC = void (*)(GLint x, GLint y, GLsizei width, GLsizei height);
@@ -1678,6 +2077,7 @@ index 0000000..1636c78
 +    using PFNGLPIXELSTOREIPROC = void (*)(GLenum pname, GLint param);
 +
 +    extern PFNGLGETERRORPROC glGetError;
++    extern PFNGLGETINTEGERVPROC glGetIntegerv;
 +    extern PFNGLGETSTRINGPROC glGetString;
 +    extern PFNGLVIEWPORTPROC glViewport;
 +    extern PFNGLSCISSORPROC glScissor;
@@ -1753,10 +2153,10 @@ index 0000000..1636c78
 +} // namespace snp::gles3
 diff --git a/src/gles3/gles3_renderer_context.cpp b/src/gles3/gles3_renderer_context.cpp
 new file mode 100644
-index 0000000..abfa9e3
+index 0000000..13c4ce4
 --- /dev/null
 +++ b/src/gles3/gles3_renderer_context.cpp
-@@ -0,0 +1,675 @@
+@@ -0,0 +1,676 @@
 +#include "gles3_renderer_context.h"
 +#include "rdram_access.h"
 +#include <cstdio>
@@ -2248,13 +2648,14 @@ index 0000000..abfa9e3
 +            case G_EX: {
 +                uint32_t subcmd = w0 & 0xFFu;
 +                if (subcmd == G_EX_SETRECTALIGN) {
-+                    uint32_t origin = w1 & 0xFFFu;
++                    uint32_t origin_x = w1 & 0xFFFu;
++                    uint32_t origin_y = (w1 >> 12) & 0xFFFu;
 +                    uint32_t next_w0 = read_rdram_u32(rdram_, pc);
 +                    uint32_t next_w1 = read_rdram_u32(rdram_, pc + 4);
 +                    pc += 8;
 +                    int32_t off_x = static_cast<int32_t>(static_cast<int16_t>(next_w0 >> 16));
 +                    int32_t off_y = static_cast<int32_t>(static_cast<int16_t>(next_w1 >> 16));
-+                    rsp_state_->ex_set_rect_align(origin, off_x, off_y);
++                    rsp_state_->ex_set_rect_align(origin_x, origin_y, off_x, off_y);
 +                } else if (subcmd == G_EX_PUSHSCISSOR) {
 +                    rsp_state_->ex_push_scissor();
 +                } else if (subcmd == G_EX_POPSCISSOR) {
@@ -2528,10 +2929,10 @@ index 0000000..089343d
 +} // namespace snp::gles3
 diff --git a/src/gles3/n64_gbi.h b/src/gles3/n64_gbi.h
 new file mode 100644
-index 0000000..6ace1e7
+index 0000000..3503e87
 --- /dev/null
 +++ b/src/gles3/n64_gbi.h
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,189 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -2608,6 +3009,8 @@ index 0000000..6ace1e7
 +constexpr uint32_t G_EX_ORIGIN_LEFT = 0x000u;
 +constexpr uint32_t G_EX_ORIGIN_RIGHT = 0x400u;
 +constexpr uint32_t G_EX_ORIGIN_NONE = 0x800u;
++constexpr uint32_t G_EX_ORIGIN_TOP = 0x000u;
++constexpr uint32_t G_EX_ORIGIN_BOTTOM = 0x400u;
 +
 +// Geometry Mode Flags
 +constexpr uint32_t G_ZBUFFER = 0x00000001u;
@@ -2790,10 +3193,10 @@ index 0000000..7292198
 +} // namespace snp::gles3
 diff --git a/src/gles3/rsp_state.cpp b/src/gles3/rsp_state.cpp
 new file mode 100644
-index 0000000..8e2a4bc
+index 0000000..adf1d61
 --- /dev/null
 +++ b/src/gles3/rsp_state.cpp
-@@ -0,0 +1,949 @@
+@@ -0,0 +1,1019 @@
 +#include "rsp_state.h"
 +#include "rdram_access.h"
 +#include <cmath>
@@ -2806,6 +3209,7 @@ index 0000000..8e2a4bc
 +    constexpr float N64_WIDTH = 320.0f;
 +    constexpr float N64_HEIGHT = 240.0f;
 +    constexpr float N64_HALF_WIDTH = 160.0f;
++    constexpr float N64_HALF_HEIGHT = 120.0f;
 +    constexpr float SUBPIXEL_SCALE = 4.0f;
 +    constexpr float UV_FIXED_SCALE = 32.0f;
 +    constexpr float DSDX_1CYCLE_SCALE = 1024.0f;
@@ -2924,7 +3328,8 @@ index 0000000..8e2a4bc
 +    current_tex_scale_t_ = 1.0f;
 +    current_tex_offset_s_ = 0.0f;
 +    current_tex_offset_t_ = 0.0f;
-+    rect_align_origin_ = G_EX_ORIGIN_NONE;
++    rect_align_origin_x_ = G_EX_ORIGIN_NONE;
++    rect_align_origin_y_ = G_EX_ORIGIN_NONE;
 +    rect_align_offset_x_ = 0;
 +    rect_align_offset_y_ = 0;
 +    while (!scissor_stack_.empty()) scissor_stack_.pop();
@@ -2935,10 +3340,14 @@ index 0000000..8e2a4bc
 +    win_w_ = win_w;
 +    win_h_ = win_h;
 +    expand_aspect_ = expand_aspect;
-+    if (expand_aspect && win_h > 0) {
-+        widescreen_scale_ = (static_cast<float>(win_w) / static_cast<float>(win_h)) / (4.0f / 3.0f);
++    if (expand_aspect && win_h > 0 && win_w > 0) {
++        constexpr float kFourByThree = 4.0f / 3.0f;
++        float win_ratio = static_cast<float>(win_w) / static_cast<float>(win_h);
++        widescreen_scale_ = std::max(1.0f, win_ratio / kFourByThree);
++        tallscreen_scale_ = std::max(1.0f, kFourByThree / win_ratio);
 +    } else {
 +        widescreen_scale_ = 1.0f;
++        tallscreen_scale_ = 1.0f;
 +    }
 +}
 +
@@ -3215,19 +3624,46 @@ index 0000000..8e2a4bc
 +        return 0.0f;
 +    }
 +    float offset_px = static_cast<float>(rect_align_offset_x_) / SUBPIXEL_SCALE;
-+    if (rect_align_origin_ == G_EX_ORIGIN_LEFT) {
++    if (rect_align_origin_x_ == G_EX_ORIGIN_LEFT) {
 +        return -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f) + offset_px;
 +    }
-+    if (rect_align_origin_ == G_EX_ORIGIN_RIGHT) {
++    if (rect_align_origin_x_ == G_EX_ORIGIN_RIGHT) {
 +        return N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f) + offset_px;
 +    }
 +    return offset_px;
 +}
 +
++float RspState::compute_rect_shift_y() const {
++    if (!expand_aspect_ || tallscreen_scale_ <= 1.0f) {
++        return 0.0f;
++    }
++    float offset_py = static_cast<float>(rect_align_offset_y_) / SUBPIXEL_SCALE;
++    if (rect_align_origin_y_ == G_EX_ORIGIN_TOP) {
++        return -N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f) + offset_py;
++    }
++    if (rect_align_origin_y_ == G_EX_ORIGIN_BOTTOM) {
++        return N64_HEIGHT + N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f) + offset_py;
++    }
++    return offset_py;
++}
++
 +void RspState::apply_gl_scissor_for_rect(const FboEntry& fbo, const ScissorRect& scissor) const {
-+    float scale_y = static_cast<float>(fbo.height) / N64_HEIGHT;
-+    int sy = static_cast<int>((N64_HEIGHT - static_cast<float>(scissor.y + scissor.height)) * scale_y);
-+    int sh = static_cast<int>(static_cast<float>(scissor.height) * scale_y);
++    int sy = 0;
++    int sy_top = fbo.height;
++    if (expand_aspect_ && tallscreen_scale_ > 1.0f) {
++        auto map_y_gl = [&](int n64_y) -> int {
++            float norm = 0.5f - ((static_cast<float>(n64_y) - N64_HALF_HEIGHT) / (N64_HEIGHT * tallscreen_scale_));
++            return static_cast<int>(std::lround(norm * static_cast<float>(fbo.height)));
++        };
++        sy_top = (scissor.y <= 0) ? fbo.height : map_y_gl(scissor.y);
++        int bottom_n64 = scissor.y + scissor.height;
++        sy = (bottom_n64 >= static_cast<int>(N64_HEIGHT)) ? 0 : map_y_gl(bottom_n64);
++    } else {
++        float scale_y = static_cast<float>(fbo.height) / N64_HEIGHT;
++        sy = static_cast<int>((N64_HEIGHT - static_cast<float>(scissor.y + scissor.height)) * scale_y);
++        sy_top = static_cast<int>((N64_HEIGHT - static_cast<float>(scissor.y)) * scale_y);
++    }
++    int sh = std::max(1, sy_top - sy);
 +
 +    int sx = 0;
 +    int sx_right = fbo.width;
@@ -3295,6 +3731,12 @@ index 0000000..8e2a4bc
 +        proj.m[1][0] /= widescreen_scale_;
 +        proj.m[2][0] /= widescreen_scale_;
 +        proj.m[3][0] /= widescreen_scale_;
++    }
++    if (expand_aspect_ && tallscreen_scale_ > 1.0f) {
++        proj.m[0][1] /= tallscreen_scale_;
++        proj.m[1][1] /= tallscreen_scale_;
++        proj.m[2][1] /= tallscreen_scale_;
++        proj.m[3][1] /= tallscreen_scale_;
 +    }
 +
 +    float alpha_threshold = cutout_alpha ? ALPHA_THRESHOLD_CUTOUT : ALPHA_THRESHOLD_COMPARE;
@@ -3557,8 +3999,11 @@ index 0000000..8e2a4bc
 +    float y1 = (static_cast<float>(lry) / SUBPIXEL_SCALE) + inclusive_pad;
 +
 +    float shift_x = compute_rect_shift_x();
++    float shift_y = compute_rect_shift_y();
 +    x0 += shift_x;
 +    x1 += shift_x;
++    y0 += shift_y;
++    y1 += shift_y;
 +
 +    float dsdx_divisor = is_copy ? DSDX_COPY_SCALE : DSDX_1CYCLE_SCALE;
 +    float s0 = static_cast<float>(static_cast<int16_t>(uls)) / UV_FIXED_SCALE;
@@ -3589,6 +4034,11 @@ index 0000000..8e2a4bc
 +        if (expand_aspect_ && widescreen_scale_ > 1.0f && (lrx - ulx >= 319 * 4)) {
 +            x0 = -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
 +            x1 = N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
++        }
++        if (expand_aspect_ && tallscreen_scale_ > 1.0f && (lry - uly >= 239 * 4)) {
++            float extra_h = N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f);
++            y0 = -extra_h;
++            y1 = N64_HEIGHT + extra_h;
 +        }
 +        norm_u_scale = 1.0f / N64_WIDTH;
 +        norm_v_scale = -1.0f / N64_HEIGHT;
@@ -3652,7 +4102,8 @@ index 0000000..8e2a4bc
 +        b = ((c16 >> 1) & 0x1Fu) / 31.0f;
 +        a = (c16 & 1u) ? 1.0f : 0.0f;
 +
-+        if (rect_align_origin_ == G_EX_ORIGIN_NONE && rect_align_offset_x_ == 0 &&
++        if (rect_align_origin_x_ == G_EX_ORIGIN_NONE && rect_align_origin_y_ == G_EX_ORIGIN_NONE &&
++            rect_align_offset_x_ == 0 && rect_align_offset_y_ == 0 &&
 +            ulx == 0 && uly == 0 && lrx >= 319 * 4 && lry >= 239 * 4) {
 +            submit_render_pass();
 +            FboEntry* current_fbo = fbo_manager_.get_current_fbo();
@@ -3671,12 +4122,29 @@ index 0000000..8e2a4bc
 +    }
 +
 +    float shift_x = compute_rect_shift_x();
++    float shift_y = compute_rect_shift_y();
 +    x0 += shift_x;
 +    x1 += shift_x;
++    y0 += shift_y;
++    y1 += shift_y;
 +
-+    if (expand_aspect_ && widescreen_scale_ > 1.0f && rect_align_origin_ == G_EX_ORIGIN_NONE && ulx == 0 && lrx >= 319 * 4) {
++    if (expand_aspect_ && widescreen_scale_ > 1.0f && rect_align_origin_x_ == G_EX_ORIGIN_NONE && ulx == 0 && lrx >= 319 * 4) {
 +        x0 = -N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
 +        x1 = N64_WIDTH + N64_HALF_WIDTH * (widescreen_scale_ - 1.0f);
++    }
++    if (expand_aspect_ && tallscreen_scale_ > 1.0f && rect_align_origin_y_ == G_EX_ORIGIN_NONE) {
++        float extra_h = N64_HALF_HEIGHT * (tallscreen_scale_ - 1.0f);
++        if (uly == 0 && lry >= 239 * 4 && ulx == 0 && lrx >= 319 * 4) {
++            y0 = -extra_h;
++            y1 = N64_HEIGHT + extra_h;
++        } else if (ulx == 0 && lrx >= 319 * 4 && y0 <= 1.0f && y1 <= 64.0f) {
++            y0 = -extra_h;
++        } else if (ulx == 0 && lrx >= 319 * 4 && y1 >= 239.0f && y0 >= 176.0f) {
++            y1 = N64_HEIGHT + extra_h;
++        } else if ((lrx - ulx <= 8 * 4) && (lry - uly >= 200 * 4)) {
++            y0 = -extra_h;
++            y1 = N64_HEIGHT + extra_h;
++        }
 +    }
 +
 +    Matrix4 old_proj = projection_matrix_;
@@ -3737,7 +4205,12 @@ index 0000000..8e2a4bc
 +}
 +
 +void RspState::ex_set_rect_align(uint32_t origin, int32_t offset_x, int32_t offset_y) {
-+    rect_align_origin_ = origin;
++    ex_set_rect_align(origin, origin, offset_x, offset_y);
++}
++
++void RspState::ex_set_rect_align(uint32_t origin_x, uint32_t origin_y, int32_t offset_x, int32_t offset_y) {
++    rect_align_origin_x_ = origin_x;
++    rect_align_origin_y_ = origin_y;
 +    rect_align_offset_x_ = offset_x;
 +    rect_align_offset_y_ = offset_y;
 +}
@@ -3745,10 +4218,10 @@ index 0000000..8e2a4bc
 +} // namespace snp::gles3
 diff --git a/src/gles3/rsp_state.h b/src/gles3/rsp_state.h
 new file mode 100644
-index 0000000..d1fd4c3
+index 0000000..6e8805a
 --- /dev/null
 +++ b/src/gles3/rsp_state.h
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,239 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -3843,6 +4316,9 @@ index 0000000..d1fd4c3
 +    void ex_push_scissor();
 +    void ex_pop_scissor();
 +    void ex_set_rect_align(uint32_t origin, int32_t offset_x, int32_t offset_y);
++    void ex_set_rect_align(uint32_t origin_x, uint32_t origin_y, int32_t offset_x, int32_t offset_y);
++    float get_widescreen_scale() const { return widescreen_scale_; }
++    float get_tallscreen_scale() const { return tallscreen_scale_; }
 +
 +    void flush_batch();
 +    void submit_render_pass();
@@ -3906,6 +4382,7 @@ index 0000000..d1fd4c3
 +    Matrix4 read_matrix(const uint8_t* rdram, uint32_t phys_addr) const;
 +    void apply_lighting(RspVertex& v, float nx, float ny, float nz) const;
 +    float compute_rect_shift_x() const;
++    float compute_rect_shift_y() const;
 +    void apply_gl_scissor(const FboEntry& fbo) const;
 +    void apply_gl_scissor_for_rect(const FboEntry& fbo, const ScissorRect& scissor) const;
 +    void ensure_batch_state(GLuint tex_id, float tex_scale_s, float tex_scale_t, float tex_offset_s, float tex_offset_t);
@@ -3919,6 +4396,7 @@ index 0000000..d1fd4c3
 +    int win_h_ = 480;
 +    bool expand_aspect_ = false;
 +    float widescreen_scale_ = 1.0f;
++    float tallscreen_scale_ = 1.0f;
 +
 +    Matrix4 modelview_stack_[MODELVIEW_STACK_DEPTH];
 +    int modelview_top_ = 0;
@@ -3955,7 +4433,8 @@ index 0000000..d1fd4c3
 +    ScissorRect current_scissor_{ 0, 0, 320, 240 };
 +    std::stack<ScissorRect> scissor_stack_;
 +
-+    uint32_t rect_align_origin_ = G_EX_ORIGIN_NONE;
++    uint32_t rect_align_origin_x_ = G_EX_ORIGIN_NONE;
++    uint32_t rect_align_origin_y_ = G_EX_ORIGIN_NONE;
 +    int32_t rect_align_offset_x_ = 0;
 +    int32_t rect_align_offset_y_ = 0;
 +
@@ -6302,10 +6781,10 @@ index 0000000..c72e191
 +} // namespace snp::handheld
 diff --git a/src/handheld/handheld_main.cpp b/src/handheld/handheld_main.cpp
 new file mode 100644
-index 0000000..af751e7
+index 0000000..7066042
 --- /dev/null
 +++ b/src/handheld/handheld_main.cpp
-@@ -0,0 +1,457 @@
+@@ -0,0 +1,462 @@
 +#include <algorithm>
 +#include <atomic>
 +#include <chrono>
@@ -6513,17 +6992,22 @@ index 0000000..af751e7
 +void update_gfx(void*) {
 +    snp::handheld::poll_input();
 +
++    constexpr float kFourByThree = 4.0f / 3.0f;
 +    float widescreen_scale = 1.0f;
++    float tallscreen_scale = 1.0f;
 +    if (ultramodern::renderer::get_graphics_config().ar_option == ultramodern::renderer::AspectRatio::Expand) {
 +        int width = 0, height = 0;
 +        if (s_window != nullptr) {
 +            SDL_GetWindowSize(s_window, &width, &height);
 +            if (width > 0 && height > 0) {
-+                widescreen_scale = std::max(1.0f, (static_cast<float>(width) / static_cast<float>(height)) / (4.0f / 3.0f));
++                float aspect = static_cast<float>(width) / static_cast<float>(height);
++                widescreen_scale = std::max(1.0f, aspect / kFourByThree);
++                tallscreen_scale = std::max(1.0f, kFourByThree / aspect);
 +            }
 +        }
 +    }
 +    snp::set_widescreen_scale(widescreen_scale);
++    snp::set_tallscreen_scale(tallscreen_scale);
 +}
 +
 +std::string get_game_thread_name(const OSThread* t) {
@@ -6765,10 +7249,10 @@ index 0000000..af751e7
 +}
 diff --git a/src/handheld/handheld_overlay.cpp b/src/handheld/handheld_overlay.cpp
 new file mode 100644
-index 0000000..d6a80f8
+index 0000000..bfc59b6
 --- /dev/null
 +++ b/src/handheld/handheld_overlay.cpp
-@@ -0,0 +1,712 @@
+@@ -0,0 +1,735 @@
 +#include "handheld_overlay.h"
 +
 +#include <algorithm>
@@ -6782,6 +7266,7 @@ index 0000000..d6a80f8
 +#include <string>
 +#include <vector>
 +
++#include <SDL2/SDL.h>
 +#include "gl_loader.h"
 +#include "handheld_config.h"
 +#include "handheld_font.h"
@@ -7118,8 +7603,30 @@ index 0000000..d6a80f8
 +        return (cfg.controls.face_layout == FACE_LAYOUT_POSITIONAL) ? "Positional (Swap)" : "Nintendo (B/A/Y/X)";
 +    case MenuRow::SwapSticks:
 +        return cfg.controls.swap_sticks ? "On" : "Off";
-+    case MenuRow::AspectRatio:
-+        return (cfg.video.aspect_ratio == ASPECT_RATIO_EXPAND) ? "3:2 Expand" : "4:3 Original";
++    case MenuRow::AspectRatio: {
++        if (cfg.video.aspect_ratio != ASPECT_RATIO_EXPAND) {
++            return "4:3 Original";
++        }
++        SDL_Window* window = SDL_GL_GetCurrentWindow();
++        if (window != nullptr) {
++            int width = 0, height = 0;
++            SDL_GetWindowSize(window, &width, &height);
++            if (width > 0 && height > 0) {
++                float aspect = static_cast<float>(width) / static_cast<float>(height);
++                constexpr float kTolerance = 0.05f;
++                auto matches = [aspect](float target) {
++                    return std::abs(aspect - target) <= kTolerance;
++                };
++                if (matches(1.0f)) return "1:1 Expand";
++                if (matches(5.0f / 4.0f)) return "5:4 Expand";
++                if (matches(4.0f / 3.0f)) return "4:3 Expand";
++                if (matches(3.0f / 2.0f)) return "3:2 Expand";
++                if (matches(16.0f / 10.0f)) return "16:10 Expand";
++                if (matches(16.0f / 9.0f)) return "16:9 Expand";
++            }
++        }
++        return "Full Expand";
++    }
 +    case MenuRow::Resolution:
 +        return (cfg.video.resolution_scale >= 2) ? "2x (480p)" : "1x (240p)";
 +    case MenuRow::VSync:
@@ -7665,10 +8172,10 @@ index 0000000..f89dca2
 +} // namespace snp::handheld
 diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
 new file mode 100644
-index 0000000..3ad16de
+index 0000000..15e70cd
 --- /dev/null
 +++ b/tests/CMakeLists.txt
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,44 @@
 +cmake_minimum_required(VERSION 3.20)
 +project(test_gles3_renderer LANGUAGES C CXX)
 +
@@ -7686,10 +8193,14 @@ index 0000000..3ad16de
 +    ../src/gles3/fbo_manager.cpp
 +    ../src/gles3/rsp_state.cpp
 +    ../src/gles3/gles3_renderer_context.cpp
++    ../src/game/widescreen.cpp
 +)
 +
 +target_include_directories(test_gles3_renderer PRIVATE
 +    ${CMAKE_CURRENT_SOURCE_DIR}/../src/gles3
++    ${CMAKE_CURRENT_SOURCE_DIR}/../include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/N64Recomp/include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/librecomp/include
 +    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include
 +    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include/ultramodern
 +    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty
@@ -7711,10 +8222,10 @@ index 0000000..3ad16de
 +
 diff --git a/tests/test_gles3_renderer.cpp b/tests/test_gles3_renderer.cpp
 new file mode 100644
-index 0000000..b780da4
+index 0000000..2bd6ef8
 --- /dev/null
 +++ b/tests/test_gles3_renderer.cpp
-@@ -0,0 +1,612 @@
+@@ -0,0 +1,734 @@
 +#include <cstdio>
 +#include <cstdlib>
 +#include <cstdint>
@@ -7727,6 +8238,7 @@ index 0000000..b780da4
 +#include "combiner_shader_cache.h"
 +#include "rdram_access.h"
 +#include "n64_gbi.h"
++#include "snp_config.h"
 +
 +// Stubs for ultramodern functions required by the renderer context
 +namespace ultramodern::renderer {
@@ -8229,6 +8741,127 @@ index 0000000..b780da4
 +        }
 +
 +        std::printf("[Test] View * Proj widescreen column 0 scale across all 4 rows verified\n");
++    }
++
++    // 720x720 (1:1) Vert+ Tallscreen tests
++    {
++        assert(snp::get_tall_hud_mode() == snp::TallHudMode::Edge);
++        snp::set_tall_hud_mode(snp::TallHudMode::Center);
++        assert(snp::get_tall_hud_mode() == snp::TallHudMode::Center);
++        snp::set_tall_hud_mode(snp::TallHudMode::Edge);
++
++        snp::set_tallscreen_scale(1.0f);
++        assert(snp::get_tallscreen_scale() == 1.0f);
++        assert(snp_cull_height_scale() == 1.0f);
++
++        uint32_t bits_4x3_pos = snp_reticle_vlimit_bits(1);
++        uint32_t bits_4x3_neg = snp_reticle_vlimit_bits(-1);
++        float limit_4x3_pos = 0.0f, limit_4x3_neg = 0.0f;
++        std::memcpy(&limit_4x3_pos, &bits_4x3_pos, sizeof(float));
++        std::memcpy(&limit_4x3_neg, &bits_4x3_neg, sizeof(float));
++        assert(std::abs(limit_4x3_pos - 104.0f) < 1e-4f);
++        assert(std::abs(limit_4x3_neg - (-104.0f)) < 1e-4f);
++
++        constexpr float kTallScale1x1 = 4.0f / 3.0f;
++        snp::set_tallscreen_scale(kTallScale1x1);
++        assert(std::abs(snp::get_tallscreen_scale() - kTallScale1x1) < 1e-5f);
++        assert(std::abs(snp_cull_height_scale() - kTallScale1x1) < 1e-5f);
++
++        uint32_t bits_1x1_pos = snp_reticle_vlimit_bits(1);
++        uint32_t bits_1x1_neg = snp_reticle_vlimit_bits(-1);
++        float limit_1x1_pos = 0.0f, limit_1x1_neg = 0.0f;
++        std::memcpy(&limit_1x1_pos, &bits_1x1_pos, sizeof(float));
++        std::memcpy(&limit_1x1_neg, &bits_1x1_neg, sizeof(float));
++        assert(std::abs(limit_1x1_pos - 144.0f) < 1e-4f);
++        assert(std::abs(limit_1x1_neg - (-144.0f)) < 1e-4f);
++        snp::set_tallscreen_scale(1.0f);
++
++        std::printf("[Test] Tallscreen cull height scale and reticle vlimit bits verified\n");
++
++        snp::gles3::TmemTextureCache tmem;
++        snp::gles3::CombinerShaderCache shaders;
++        snp::gles3::FboManager fbos;
++        snp::gles3::RspState rsp(tmem, shaders, fbos);
++
++        rsp.set_window_size(720, 720, true);
++        assert(std::abs(rsp.get_tallscreen_scale() - (4.0f / 3.0f)) < 1e-5f);
++        assert(std::abs(rsp.get_widescreen_scale() - 1.0f) < 1e-5f);
++
++        fbos.bind_fbo(0x00500000u, 720, 720, rdram.data());
++
++        float test_proj[4][4]{
++            { 1.5f, 0.4f, 0.0f, 0.0f },
++            { 0.3f, 2.0f, 0.0f, 0.0f },
++            { 0.1f, 0.2f, 1.0f, 0.0f },
++            { 0.0f, -1.0f, 0.0f, 1.0f }
++        };
++        write_matrix_s15_16(rdram.data(), 0x0000A000u, test_proj);
++        rsp.load_matrix(rdram.data(), 0x0000A000u, snp::gles3::G_MTX_PROJECTION | snp::gles3::G_MTX_LOAD);
++
++        float identity[4][4]{
++            { 1.0f, 0.0f, 0.0f, 0.0f },
++            { 0.0f, 1.0f, 0.0f, 0.0f },
++            { 0.0f, 0.0f, 1.0f, 0.0f },
++            { 0.0f, 0.0f, 0.0f, 1.0f }
++        };
++        write_matrix_s15_16(rdram.data(), 0x0000A040u, identity);
++        rsp.load_matrix(rdram.data(), 0x0000A040u, snp::gles3::G_MTX_MODELVIEW | snp::gles3::G_MTX_LOAD);
++
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A100u + 0, 0);
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A100u + 2, 0);
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A100u + 4, 0);
++        snp::gles3::write_rdram_u32(rdram.data(), 0x0000A100u + 12, 0xFFFFFFFFu);
++
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A110u + 0, 10);
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A110u + 2, 0);
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A110u + 4, 0);
++        snp::gles3::write_rdram_u32(rdram.data(), 0x0000A110u + 12, 0xFFFFFFFFu);
++
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A120u + 0, 0);
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A120u + 2, 10);
++        snp::gles3::write_rdram_s16(rdram.data(), 0x0000A120u + 4, 0);
++        snp::gles3::write_rdram_u32(rdram.data(), 0x0000A120u + 12, 0xFFFFFFFFu);
++
++        rsp.load_vertices(rdram.data(), 0x0000A100u, 3, 0);
++        rsp.draw_tri1(0, 1, 2);
++        rsp.flush_batch();
++        rsp.submit_render_pass();
++        assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
++
++        for (int row = 0; row < 4; ++row) {
++            float unscaled_x = test_proj[row][0];
++            assert(std::abs(unscaled_x - test_proj[row][0]) < 1e-5f);
++
++            float unscaled_y = test_proj[row][1];
++            float scaled_y = unscaled_y / kTallScale1x1;
++            assert(std::abs(scaled_y * kTallScale1x1 - unscaled_y) < 1e-5f);
++        }
++        std::printf("[Test] View * Proj tallscreen column 1 scale across all 4 rows verified\n");
++
++        rsp.set_scissor(0, 0, 320 * 4, 240 * 4);
++        rsp.draw_fill_rect(0, 0, 10 * 4, 10 * 4);
++        rsp.flush_batch();
++        rsp.submit_render_pass();
++        GLint box[4]{};
++        snp::gles3::gl::glGetIntegerv(GL_SCISSOR_BOX, box);
++        assert(box[0] == 0 && box[1] == 0 && box[2] == 720 && box[3] == 720);
++
++        rsp.set_scissor(32 * 4, 30 * 4, 288 * 4, 210 * 4);
++        rsp.draw_fill_rect(32 * 4, 30 * 4, 40 * 4, 40 * 4);
++        rsp.flush_batch();
++        rsp.submit_render_pass();
++        snp::gles3::gl::glGetIntegerv(GL_SCISSOR_BOX, box);
++        assert(box[1] == 158 && box[3] == 405);
++
++        rsp.set_scissor(0, 0, 320 * 4, 240 * 4);
++        rsp.draw_fill_rect(0, 0, 320 * 4, 40 * 4);
++        rsp.draw_fill_rect(0, 200 * 4, 320 * 4, 240 * 4);
++        rsp.draw_fill_rect(0, 0, 320 * 4, 240 * 4);
++        rsp.flush_batch();
++        rsp.submit_render_pass();
++        assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
++
++        std::printf("[Test] 720x720 1:1 Vert+ tallscreen scissor mapping and letterbox extension verified\n");
 +    }
 +
 +    // FBO feedback texture selection excluding current_fbo_addr_ and 0x0011B760

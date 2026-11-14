@@ -125,7 +125,8 @@ namespace {
             uint32_t word = (uint32_t)MEM_W(off, (gpr)(int32_t)src);
             if (off % 16 == 0) {
                 int16_t x = (int16_t)(word >> 16);
-                word = ((uint32_t)(uint16_t)(x * 4) << 16) | (word & 0xFFFF);
+                int16_t y = (int16_t)(word & 0xFFFF);
+                word = ((uint32_t)(uint16_t)(x * 4) << 16) | (uint16_t)(y * 4);
             }
             MEM_W(off, (gpr)(int32_t)dst) = (int32_t)word;
         }
@@ -978,7 +979,9 @@ namespace {
     constexpr uint32_t hud_element_bottom = 80 * 4;
     constexpr int32_t hud_margin = 16 * 4;
     constexpr int32_t right_origin_shift = -320 * 4; // RT64 adds the width to right-anchored coordinates
+    constexpr int32_t bottom_origin_shift = -240 * 4;
     constexpr uint32_t origin_left = 0x0, origin_right = 0x400, origin_none = 0x800;
+    constexpr uint32_t origin_top = 0x0, origin_bottom = 0x400;
     bool in_hud = false;
     // The front-end menus draw with the same projection, and the OPT. menu's
     // top row is in the band: no anchoring there.
@@ -1014,7 +1017,7 @@ namespace {
     }
 
     // addr: a G_TEXRECT (3 commands) or G_FILLRECT (1 command).
-    void anchor_rect(uint8_t* rdram, uint32_t addr, uint32_t words, uint32_t origin, int32_t offset) {
+    void anchor_rect(uint8_t* rdram, uint32_t addr, uint32_t words, uint32_t origin_x, uint32_t origin_y, int32_t offset_x, int32_t offset_y) {
         if (hud_entry >= hud_entries) {
             return;
         }
@@ -1027,8 +1030,8 @@ namespace {
         cmd(0x64000017, 0);          // gEXPushScissor
         cmd(0x64000005, (origin_left << 2) | (origin_right << 14)); // gEXSetScissor: the whole window
         cmd(0, 240 * 4);
-        cmd(0x64000006, origin | (origin << 12)); // gEXSetRectAlign
-        cmd((uint32_t)(uint16_t)offset << 16, (uint32_t)(uint16_t)offset << 16);
+        cmd(0x64000006, origin_x | (origin_y << 12)); // gEXSetRectAlign
+        cmd((uint32_t)(uint16_t)offset_x << 16, (uint32_t)(uint16_t)offset_y << 16);
         for (uint32_t i = 0; i < words; i++) {
             cmd((uint32_t)MEM_W(0, (gpr)(int32_t)(addr + i * 8)), (uint32_t)MEM_W(4, (gpr)(int32_t)(addr + i * 8)));
         }
@@ -1045,23 +1048,26 @@ namespace {
         }
     }
 
-    // A prefix that clears only the strips beside the 4:3 picture (where the
-    // N64 shows nothing) to fill (black, or a fog colour), then branches to
-    // the game's list: in Expand the scenery doesn't always reach past the
-    // 4:3 edge (gaps in a far skyline), and the game never clears its
-    // framebuffer, so the strips kept old frames. The 4:3 picture is left as
-    // the game draws it: rows the scenery misses there keep the last frames
-    // as on the N64 (the grass's gaps at the bottom), and the motion blur
-    // draws over the last frame.
+    void anchor_rect(uint8_t* rdram, uint32_t addr, uint32_t words, uint32_t origin, int32_t offset) {
+        anchor_rect(rdram, addr, words, origin, origin_none, offset, 0);
+    }
+
+    // A prefix that clears the side strips (widescreen) and/or top/bottom strips (tallscreen),
+    // then branches to the game's list.
     uint32_t side_clear_prefix(uint8_t* rdram, uint32_t dl, uint32_t fill) {
         uint32_t prefix = prefix_area + prefix_slot * prefix_bytes;
         prefix_slot = (prefix_slot + 1) % prefix_slots;
         uint32_t commands[prefix_commands][2];
         uint32_t n = 0;
         auto cmd = [&](uint32_t a, uint32_t b) { commands[n][0] = a; commands[n][1] = b; n++; };
-        // Each strip's width in 4:3 units (RT64 widens the picture by the
-        // window's aspect over 4:3), and a pixel more.
-        uint32_t strip = std::min<uint32_t>((uint32_t)(160.0f * (snp::get_widescreen_scale() - 1.0f) * 4.0f) + 4, 320 * 4);
+
+        float ws = snp::get_widescreen_scale();
+        float ts = snp::get_tallscreen_scale();
+        bool widen = ws > 1.0f;
+        bool heighten = ts > 1.0f;
+        uint32_t strip_w = widen ? std::min<uint32_t>(static_cast<uint32_t>(160.0f * (ws - 1.0f) * 4.0f) + 4, 320 * 4) : 0;
+        uint32_t strip_h = heighten ? std::min<uint32_t>(static_cast<uint32_t>(120.0f * (ts - 1.0f) * 4.0f) + 4, 240 * 4) : 0;
+
         cmd(0xE0525464, 0x10000064); // gEXEnable
         cmd(0xE3000A01, 0x00300000); // cycle type: fill
         cmd(0xF7000000, fill);
@@ -1073,12 +1079,24 @@ namespace {
                 continue;
             }
             cmd(cimgs[i][0], cimgs[i][1]);
-            cmd(0x64000006, origin_left | (origin_left << 12)); // gEXSetRectAlign: from the left edge
-            cmd(0, 0);
-            cmd((G_FILLRECT << 24) | ((strip & 0xFFF) << 12) | (239 * 4), 0);
-            cmd(0x64000006, origin_right | (origin_right << 12)); // from the right edge
-            cmd((uint32_t)(uint16_t)right_origin_shift << 16, (uint32_t)(uint16_t)right_origin_shift << 16);
-            cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (239 * 4), ((320 * 4 - strip) & 0xFFF) << 12);
+            if (widen) {
+                cmd(0x64000006, origin_left | (origin_none << 12)); // gEXSetRectAlign: from the left edge
+                cmd(0, 0);
+                cmd((G_FILLRECT << 24) | ((strip_w & 0xFFF) << 12) | (239 * 4), 0);
+                cmd(0x64000006, origin_right | (origin_none << 12)); // from the right edge
+                cmd(static_cast<uint32_t>(static_cast<uint16_t>(right_origin_shift)) << 16, 0);
+                cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (239 * 4), ((320 * 4 - strip_w) & 0xFFF) << 12);
+            }
+            if (heighten) {
+                // Top horizontal strip: [-extra_h, 0], x: 0..320
+                cmd(0x64000006, origin_none | (origin_top << 12));
+                cmd(0, 0);
+                cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (strip_h & 0xFFF), 0);
+                // Bottom horizontal strip: [240, 240 + extra_h], x: 0..320
+                cmd(0x64000006, origin_none | (origin_bottom << 12));
+                cmd(0, static_cast<uint32_t>(static_cast<uint16_t>(bottom_origin_shift)) << 16);
+                cmd((G_FILLRECT << 24) | ((319 * 4) << 12) | (239 * 4), (240 * 4 - strip_h) & 0xFFF);
+            }
         }
         cmd(0x64000006, origin_none | (origin_none << 12)); // back to unanchored
         cmd(0, 0);
@@ -1112,6 +1130,10 @@ namespace {
     // scissor, a wrapped one moved back by 1024.
     void place_crosshair_line(uint8_t* rdram, const HudRect& r) {
         if (r.words != 1 || r.lry - r.uly < 200 * 4 || r.lrx - r.ulx > 8 * 4) {
+            return;
+        }
+        if (snp::get_tallscreen_scale() > 1.0f) {
+            anchor_rect(rdram, r.addr, 1, origin_none, origin_none, (r.ulx >= 640 * 4) ? -1024 * 4 : 0, 0);
             return;
         }
         if (r.ulx >= 640 * 4) {
@@ -1171,12 +1193,15 @@ namespace {
         const float size = std::clamp((240.0f * 4 - (B - T)) / ((240.0f - 64.0f) * 4), 0.0f, 1.0f);
         const float side = std::clamp(((L + R) / 2.0f - 160.0f * 4) / (64.0f * 4), -1.0f, 1.0f);
         const int32_t offset = (int32_t)std::lround(extra * size * side);
+        bool tall_edge = (snp::get_tallscreen_scale() > 1.0f) &&
+                         (snp::get_tall_hud_mode() == snp::TallHudMode::Edge);
         for (uint32_t i = 0; i < n; i++) {
             const HudRect& r = fill_run[i];
             framed[i] = r.ulx + slack >= L && r.lrx <= R + slack && r.uly + slack >= T && r.lry <= B + slack &&
                 (r.lry - r.uly <= thin || r.lrx - r.ulx <= thin);
             if (framed[i]) {
-                anchor_rect(rdram, r.addr, r.words, origin_none, offset);
+                uint32_t box_origin_y = tall_edge ? origin_top : origin_none;
+                anchor_rect(rdram, r.addr, r.words, origin_none, box_origin_y, offset, 0);
             }
         }
         return true;
@@ -1267,6 +1292,8 @@ namespace {
                 place_crosshair_line(rdram, fill_run[i]);
             }
         }
+        bool tall_edge = (snp::get_tallscreen_scale() > 1.0f) &&
+                         (snp::get_tall_hud_mode() == snp::TallHudMode::Edge);
         for (uint32_t i = 0; i < n; i++) {
             if (framed[i] || find(i) != i) {
                 continue;
@@ -1280,14 +1307,33 @@ namespace {
                     lry = std::max(lry, fill_run[j].lry);
                 }
             }
-            uint32_t origin;
-            int32_t offset;
-            if (!hud_origin(ulx, uly, lrx, lry, origin, offset)) {
+            uint32_t origin_x = origin_none;
+            int32_t offset_x = 0;
+            bool x_anchored = hud_origin(ulx, uly, lrx, lry, origin_x, offset_x);
+
+            uint32_t origin_y = origin_none;
+            int32_t offset_y = 0;
+            bool y_anchored = false;
+
+            if (tall_edge) {
+                if (uly < hud_band_bottom && lry < hud_element_bottom) {
+                    origin_y = origin_top;
+                    offset_y = 0;
+                    y_anchored = true;
+                } else if (uly >= 180 * 4 && lry <= 240 * 4) {
+                    origin_y = origin_bottom;
+                    offset_y = bottom_origin_shift;
+                    y_anchored = true;
+                }
+            }
+
+            if (!x_anchored && !y_anchored) {
                 continue;
             }
+
             for (uint32_t j = 0; j < n; j++) {
                 if (find(j) == i) {
-                    anchor_rect(rdram, fill_run[j].addr, fill_run[j].words, origin, offset);
+                    anchor_rect(rdram, fill_run[j].addr, fill_run[j].words, origin_x, origin_y, offset_x, offset_y);
                 }
             }
         }
@@ -1725,13 +1771,15 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
     }
     pending_filter = 0;
     bool widen = snp::get_widescreen_scale() > 1.0f;
+    bool heighten = snp::get_tallscreen_scale() > 1.0f;
+    bool expanded = widen || heighten;
     interp_bank = (interp_bank + 1) % interp_banks;
     interp_entry = 0;
     snp::interp_new_frame();
     if (log_frame) {
         static const auto start = std::chrono::steady_clock::now();
         double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        printf("[DL] ---- frame %d at %.1f s, display list %08X%s\n", frame - 1, t, dl, widen ? " (widened)" : "");
+        printf("[DL] ---- frame %d at %.1f s, display list %08X%s\n", frame - 1, t, dl, expanded ? " (expanded)" : "");
     }
     for (uint32_t& s : segments) {
         s = 0;
@@ -1756,7 +1804,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
     instance_tags.clear();
     modelview_top = 0;
     modelview[0] = identity_matrix();
-    walk(rdram, dl, 0, widen, true);
+    walk(rdram, dl, 0, expanded, true);
     end_fill_run(rdram);
     align_crosshair_lines(rdram);
     number_tagged_instances(rdram);
@@ -1764,21 +1812,21 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
     // inset keep the wide picture (the game never clears them): the first
     // frames clear every color image they draw to, enough for all three
     // framebuffers.
-    static bool was_widened = false;
+    static bool was_expanded = false;
     static int clear_after_switch = 0;
-    if (was_widened && !widen) {
+    if (was_expanded && !expanded) {
         clear_after_switch = 6;
     }
-    was_widened = widen;
+    was_expanded = expanded;
     bool clear_all = clear_after_switch > 0;
     if (clear_all) {
         clear_after_switch--;
     }
     if (first_cimg_w0 != 0) {
-        if ((widen && starts_with_picture) || clear_all) {
+        if ((expanded && starts_with_picture) || clear_all) {
             MEM_W(0x30, task) = (int32_t)clear_prefix(rdram, dl, clear_all);
         }
-        else if (widen && cimg_count > 0) {
+        else if (expanded && cimg_count > 0) {
             // The fog colour the frame's scenery starts with (black if none):
             // the far scenery fades into it, and it shows where the scenery
             // doesn't reach the strips (past the edge of 2-2's sea in the

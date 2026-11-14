@@ -74,12 +74,27 @@ namespace snp::config {
     bool get_option(Option option);
 }
 
-// Widescreen (src/game/widescreen.cpp): how much wider than 4:3 RT64 is
-// drawing full-width 3D views -- the window aspect / (4/3) in Expand mode,
-// 1 otherwise. Updated by the frontend every frame.
+// Widescreen & Tallscreen (src/game/widescreen.cpp): scale factors for views
+// wider or taller than 4:3 in Expand mode. Updated by the frontend every frame.
 namespace snp {
     void set_widescreen_scale(float scale);
     float get_widescreen_scale();
+    void set_tallscreen_scale(float scale);
+    float get_tallscreen_scale();
+
+    enum class TallHudMode {
+        Center,
+        Edge
+    };
+    void set_tall_hud_mode(TallHudMode mode);
+    TallHudMode get_tall_hud_mode();
+}
+
+extern "C" {
+    float snp_cull_width_scale(void);
+    float snp_cull_height_scale(void);
+    uint32_t snp_reticle_limit_bits(int32_t side);
+    uint32_t snp_reticle_vlimit_bits(int32_t side);
 }
 
 #endif

@@ -74,6 +74,8 @@ constexpr uint32_t G_EX_ENABLE_MAGIC = 0x00525464u;
 constexpr uint32_t G_EX_ORIGIN_LEFT = 0x000u;
 constexpr uint32_t G_EX_ORIGIN_RIGHT = 0x400u;
 constexpr uint32_t G_EX_ORIGIN_NONE = 0x800u;
+constexpr uint32_t G_EX_ORIGIN_TOP = 0x000u;
+constexpr uint32_t G_EX_ORIGIN_BOTTOM = 0x400u;
 
 // Geometry Mode Flags
 constexpr uint32_t G_ZBUFFER = 0x00000001u;
