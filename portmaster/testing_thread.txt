@@ -1,45 +1,46 @@
-> ## Instructions to install the Testing Zip
-> 1. Download the testing zip from the thread.
-> 2. Extract the zip to your SD card's `ports` folder.
-> 3. Add your game files to `ports/sinandpunishment/roms/`.
-> 4. Run the port from your device's Ports menu.
+Instructions to install the Testing Zip:
+Drop the .zip into your Portmaster autoinstall folder and run Portmaster.
+or
+run via ssh: harbourmaster install "zip url from discord"
 
-## Game Information
-- **Title:** Sin and Punishment
-- **Porter:** SerPbone
-- **URL:** https://github.com/Pobega/snprecomp-portmaster
-- **Instructions:** Copy your legally obtained Sin and Punishment Nintendo 64 ROM (.z64, .n64, or .v64) into ports/sinandpunishment/roms/ before launching.
+Game Information
+Title: Sin and Punishment
+URL: https://github.com/Pobega/snprecomp-portmaster
 
-## Controls
+Instructions:
+Copy your legally obtained Sin and Punishment Nintendo 64 ROM (.z64, .n64, or .v64) into ports/sinandpunishment/roms/ before launching. Optional translation patches (.bps, .ups, .ips, .xdelta) placed in roms/ are applied automatically on first boot. First launch takes about 5 seconds to verify the ROM and reconstruct the executable.
+
 | Button | Action |
-| --- | --- |
-| D-Pad | Strafe left / right (Aim crosshair while holding L1/L2 in Stickless; navigate menus) |
-| Left Analog | Strafe left / right (Move character in Twin Stick) |
-| Right Analog | Reticle aiming (Twin Stick) |
-| A | Fire / Sword slash (Confirm in menus; Lock-on in Twin Stick) |
-| B | Jump / Double jump (Cancel in menus) |
-| X | Cycle lock-on targets / Quick crosshair re-center (Dodge roll in Twin Stick) |
-| Y | Dodge roll |
-| L1 | Shift to manual aim (Stickless) / Jump (Twin Stick) / Strafe left (Bumper Strafe) |
-| L2 | Shift to manual aim (Stickless) / Jump (Twin Stick) / Dodge roll (Legacy) |
-| R1 | Fire / Sword slash |
-| R2 | Fire / Sword slash |
-| Start | Pause game |
-| Select | Open / Close Quick Settings overlay |
-| Select + Start | Quick save and exit |
+|--|--|
+|DPAD| Strafe left / right (Aim crosshair while holding L1/L2 in Stickless; navigate menus) |
+|Left Analog| Strafe left / right (Move character in Twin Stick) |
+|Right Analog| Reticle aiming (Twin Stick) |
+|A| Fire / Sword slash (Confirm in menus; Lock-on in Twin Stick) |
+|B| Jump / Double jump (Cancel in menus) |
+|X| Cycle lock-on targets / Quick crosshair re-center (Dodge roll in Twin Stick) |
+|Y| Dodge roll |
+|L1| Shift to manual aim (Stickless) / Jump (Twin Stick) / Strafe left (Bumper Strafe) |
+|L2| Shift to manual aim (Stickless) / Jump (Twin Stick) / Dodge roll (Legacy) |
+|R1| Fire / Sword slash |
+|R2| Fire / Sword slash |
+|Start| Pause game |
+|Select| Open / Close Quick Settings overlay |
+|Select + Start| Quick save and exit |
 
-## CFW Tests:
-- [ ] AmberELEC
-- [ ] ArkOS
-- [ ] dArkOS
-- [ ] Knulli
-- [ ] MuOS
-- [ ] ROCKNIX (Libmali)
-- [ ] ROCKNIX (Panfrost)
-- [ ] ROCKNIX (Adreno - Optional)
+CFW Tests:
+[ ] AmberELEC
+[ ] dArkOS
+[ ] MuOS
+ROCKNIX
+-> [ ] Libmali
+-> [ ] Panfrost
+-> [ ] Adreno (Optional)
+[ ] Knulli
+[x] NextUI (RG34XX-H)
 
-## Resolutions:
-- [ ] 480x320 (Optional)
-- [ ] 640x480
-- [ ] 720x720 (RGB30) (Optional)
-- [ ] Higher resolutions (e.g., 1280)
+Resolutions:
+[ ] 480x320 (Optional)
+[ ] 640x480
+[x] 720x480 (RG34XX-H)
+[ ] 720x720 (RGB30) (Optional)
+[ ] Higher resolutions (e.g., 1280)

@@ -27,8 +27,15 @@ export SNP_ROM_DIR="$GAMEDIR/roms"
 export ANALOG_STICKS
 
 shopt -s nullglob nocaseglob
+rom_files=("$GAMEDIR/roms/"*.{z64,n64,v64} "$GAMEDIR/"*.{z64,n64,v64})
 raw_user_patches=("$GAMEDIR/roms/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff} "$GAMEDIR/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff})
 shopt -u nullglob nocaseglob
+
+if [ ${#rom_files[@]} -eq 0 ] && [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] && [ ! -f "$GAMEDIR/snp.n64.jp.1.0.z64" ]; then
+  pm_show_error "Copy your legally obtained Sin and Punishment Nintendo 64 ROM (.z64, .n64, or .v64) to ports/sinandpunishment/roms/ and launch again." --title "Game files missing"
+  pm_finish
+  exit 1
+fi
 
 user_patches=()
 for p in "${raw_user_patches[@]}"; do

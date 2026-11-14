@@ -257,6 +257,9 @@ cp -f "$REPO_ROOT/portmaster/port.json" "$PR_DIR/"
 cp -f "$REPO_ROOT/portmaster/README.md" "$PR_DIR/"
 cp -f "$REPO_ROOT/portmaster/gameinfo.xml" "$PR_DIR/"
 cp -f "$REPO_ROOT/portmaster/screenshot.png" "$PR_DIR/"
+if [ -f "$REPO_ROOT/portmaster/cover.png" ]; then
+    cp -f "$REPO_ROOT/portmaster/cover.png" "$PR_DIR/"
+fi
 cp -f "$REPO_ROOT/portmaster/Sin and Punishment.sh" "$PR_DIR/"
 cp -f "$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch" "$PR_DIR/patches/"
 
@@ -288,7 +291,7 @@ def add_entry(z, src, arcname, compress=zipfile.ZIP_DEFLATED):
 dist_zip = '$DIST_ZIP'
 with zipfile.ZipFile(dist_zip, 'w', zipfile.ZIP_DEFLATED) as z:
     add_entry(z, '$REPO_ROOT/portmaster/Sin and Punishment.sh', 'Sin and Punishment.sh')
-    for bf in ['port.json', 'README.md', 'gameinfo.xml', 'screenshot.png', 'testing_thread.txt']:
+    for bf in ['port.json', 'README.md', 'gameinfo.xml', 'screenshot.png', 'cover.png', 'testing_thread.txt']:
         p = os.path.join('$REPO_ROOT/portmaster', bf)
         if os.path.exists(p):
             add_entry(z, p, os.path.join('sinandpunishment', bf))

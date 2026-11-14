@@ -12,8 +12,8 @@ Optional RetroAchievements support (Softcore Mode) is included via `rcheevos`. E
 
 ## Controls
 
-| Button | Action |
-| --- | --- |
+| Key | Action |
+|--|--|
 | D-Pad | Strafe left / right (Aim crosshair while holding L1/L2 in Stickless; navigate menus) |
 | Left Analog | Strafe left / right (Move character in Twin Stick) |
 | Right Analog | Reticle aiming (Twin Stick) |
@@ -62,10 +62,4 @@ cmake -B build-aarch64 -G Ninja \
   -DCMAKE_CXX_FLAGS="-march=armv8-a -ffp-contract=off" \
   -DSNP_HOST_TOOLS_DIR="$PWD/build-host"
 ninja -C build-aarch64 SnPRecompiled snp-patch
-aarch64-linux-gnu-strip build-aarch64/SnPRecompiled build-aarch64/snp-patch
-
-# Generate clean-room ROM-keyed snp.patch
-gzip -9 -n -c build-aarch64/SnPRecompiled > build-aarch64/SnPRecompiled.gz
-./build-host/snp-patch --crypt "/path/to/rom.z64" build-aarch64/SnPRecompiled.gz portmaster/sinandpunishment/snp.patch
-rm -f build-aarch64/SnPRecompiled.gz
 ```
