@@ -1,181 +1,100 @@
-# Sin and Punishment (2000 N64) Recompiled and Port
+# Sin and Punishment Recompiled (PortMaster OpenGL ES 3.0)
 
-You will need the game file from a licensed copy in order to play it.
+A static C/C++ recompilation of **Sin and Punishment** (*Tsumi to Batsu: Hoshi no Keishousha*, Nintendo 64, 2000) tailored for **PortMaster** Linux handhelds (`aarch64`) and Linux desktop (`x86_64`).
 
-A native PC and Android port of Sin and Punishment (Tsumi to Batsu: Hoshi no Keishousha),
-made by statically recompiling the N64 game with
-[N64Recomp](https://github.com/N64Recomp/N64Recomp) and running it on
-[N64ModernRuntime](https://github.com/N64Recomp/N64ModernRuntime) with
-[RT64](https://github.com/rt64/rt64) for rendering.
+Forked from [wootbeer/snprecomp](https://github.com/wootbeer/snprecomp), this port replaces the desktop Vulkan (`RT64`) renderer and launcher with a lightweight **OpenGL ES 3.0 (`F3DEX2`)** rendering backend, dedicated stickless and twin-stick handheld control schemes, and an in-game Quick Settings overlay.
 
-Unofficial, and not affiliated with the rights holders. **No game data is
-included.** You need your own dump of the game to build or play this.
+Unofficial, and not affiliated with the rights holders. **No game data is included.** You must supply your own legally obtained cartridge dump to build or play.
 
-## Features
-- Runs natively on Windows and Android. Linux and Steam Deck builds are untested.
-- Widescreen, with the HUD at the screen edges and the reticle reaching the
-  full width (experimental).
-- High resolutions and framerates above 30 fps (experimental).
-- Mouse aim, Absolute (the reticle follows the pointer) or Relative.
-- Analog Aim for smoother aiming with a stick.
-- Smooth Aiming: the reticle moves at your display's framerate.
-- Twin-stick controller layout by default, fully remappable, and keyboard.
-- Plays the Japanese ROM or an English translation of it.
-- Texture packs: RT64 packs and Rice packs made for emulators.
-- CRT, Scanlines and LCD screen filters, and bloom.
-- Sharp texture filtering for the game and the HUD, each on its own.
-- Separate Music and Sound Effects volume.
-- Unlocks and cheats in the settings, no codes needed.
-- Add to Steam from the launcher, with artwork.
-- Android: plays with a controller or a handheld's own controls, and touch
-  controls (experimental): touch to aim and shoot, and on-screen buttons.
+## Screenshots
 
-## Game Files
-You need your own data file: the Japanese release, or an English translation
-patched onto it. Known good:
+| Title Screen (`3:2` Handheld) | Opening Cutscene (`16:9` Widescreen) |
+| :---: | :---: |
+| ![Title Screen (3:2)](docs/screenshots/title_3x2.png) | ![Opening Cutscene (16:9)](docs/screenshots/cutscene_16x9.png) |
+| **Stage Combat (`16:9` Widescreen)** | **In-Game Quick Settings (`3:2` Handheld)** |
+| ![Stage Combat (16:9)](docs/screenshots/gameplay_16x9.png) | ![Quick Settings (3:2)](docs/screenshots/quick_settings_3x2.png) |
+
+### Aspect Ratio Comparison (`Hor+` Widescreen vs Original)
+
+In `Expand` mode, the 3D camera frustum widens dynamically to match any handheld panel (`3:2`, `16:9`, `16:10`, etc.) while anchoring 2D HUD elements (`SCORE`, `TIME`, `LIFE`) cleanly to the screen edges without stretching:
+
+| `4:3` Original (`640x480`) | `3:2` Handheld Expand (`720x480`) | `16:9` Widescreen Expand (`854x480`) |
+| :---: | :---: | :---: |
+| ![4:3 Original](docs/screenshots/gameplay_4x3.png) | ![3:2 Handheld Expand](docs/screenshots/gameplay_3x2.png) | ![16:9 Widescreen Expand](docs/screenshots/gameplay_16x9.png) |
+
+## Highlights
+
+- **Static MIPS + RSP Recompilation**: Translates the original Nintendo 64 game code, dynamic stage overlays, and `n_aspMain` audio microcode ahead-of-time into native `aarch64` / `x86_64` code via [N64Recomp](https://github.com/N64Recomp/N64Recomp) and [N64ModernRuntime](https://github.com/N64Recomp/N64ModernRuntime).
+- **Custom OpenGL ES 3.0 `F3DEX2` Renderer**: Built for embedded handheld GPUs with no Vulkan requirement, running full-speed on **Allwinner H700 / Mali-G31 MP2** (Anbernic RG35XX / RG34XX / RGSP family), **PowerVR GE8300** (TrimUI Brick / Smart Pro), **RK3566 / Mali-G52**, and **Adreno** (`min_glibc = 2.30`).
+- **Context-Aware Handheld Controls**:
+  - Automatically detects analog stick count on first boot (`Stickless: Strafe + Shift` on stickless/1-stick devices, `Twin Stick` on 2-stick handhelds).
+  - Automatically switches to standard D-Pad / Left Stick + `A` (Confirm) / `B` (Back) navigation across front-end menus, file select, name entry, cutscenes, and in-stage pause menus.
+  - Includes **Smart Lock-On**, smooth S-curve digital reticle ramping, 1-button dodge rolling, target cycling, and quick crosshair re-centering.
+- **In-Game Quick Settings Overlay (`Select` / `Menu`)**: Live configuration of control schemes (`Strafe + Shift`, `Bumper Strafe`, `Face Strafe`, `D-Pad Aim`, `D-Pad Strafe`, `Twin Stick`), face-button layout (`Nintendo` vs `Positional`), aspect ratio (`Expand` vs `Original 4:3`), resolution scale (`1x 240p` / `2x 480p`), VSync, rumble, volume, and persisted saves in `snprecomp.toml`.
+
+## Supported ROM Files
+
+Copy your own Nintendo 64 cartridge dump (`.z64`, `.n64`, or `.v64`) into `ports/sinandpunishment/roms/`. Both the original Japanese release and English fan translations are supported (with separate per-region `.eep` save files):
 
 | ROM | SHA-1 |
 |---|---|
-| Tsumi to Batsu - Hoshi no Keishousha (Japan) | `581297b9d5c3a4c33169ae0aae218c742cd9cbcf` |
-| Sin and Punishment - Successor of the Earth (U), English translation | `5945ff3935d9d9531bbb5cfcabed7c198e2b2f41` |
-| Sin and Punishment - Successor of the Earth, English v1.0 [Zoinkity] | `e3906c919236dac6eba020b4b8c1df91fd725c5d` |
+| `Tsumi to Batsu - Hoshi no Keishousha (Japan)` | `581297b9d5c3a4c33169ae0aae218c742cd9cbcf` |
+| `Sin and Punishment - Successor of the Earth (U)` (English translation) | `5945ff3935d9d9531bbb5cfcabed7c198e2b2f41` |
+| `Sin and Punishment - Successor of the Earth, English v1.0 [Zoinkity]` | `e3906c919236dac6eba020b4b8c1df91fd725c5d` |
 
-Other dumps work too: `.z64`, `.n64` and `.v64`, and other translation
-patches as long as they only change text and graphics.
+## Installing on PortMaster
 
-The Spanish translation changes the game's code, so it doesn't run, but its
-Spanish voices can be used: on the Sound tab, press **Load Spanish ROM**,
-choose the Spanish dub (the Japanese ROM patched with
-`SAPESP.10.DOBLADO.xdelta`) and turn on **Spanish Voices**. The text stays the
-loaded ROM's.
-
-Start the game, pick **Load ROM** and select your file. It only has to be
-done once. You can keep one Japanese and one English ROM, each with its own
-saves, and pick either one with **Start Game**. **Change ROM** swaps one out.
-
-Add a blank portable.txt in the application's folder to make it portable,
-if you want to save settings and saves locally.
-
-## Download
-Get the latest build from the [Releases](https://github.com/wootbeer/snprecomp/releases) page.
-- **Windows:** unzip it anywhere and run `SnPRecompiled.exe`.
-- **Linux / Steam Deck (untested):** extract the `.tar.gz` and run
-  `SnPRecompiled.sh`. Settings and saves go in `~/.config/snprecomp`.
-
-- **Android:** install `SnPRecompiled-<version>-android.apk` (allow installs
-  from your browser or file manager when asked). Needs Android 9 or newer, a
-  64-bit ARM device and Vulkan with descriptor indexing: older Mali GPUs, like
-  the Mali-G52, lack it and show a black screen. On first start, **Load ROM**
-  opens the system file picker; the ROM is copied into the app, so it's needed
-  only once.
-
-On Steam Deck, in Desktop Mode, use **Add to Steam** on the launcher (or "Add a
-Non-Steam Game" in Steam), then play it from Gaming Mode.
+1. Build `dist/sinandpunishment.zip` via `make package` (or download from PortMaster / Releases).
+2. Extract `sinandpunishment.zip` into your SD card's `ports/` directory (creating `ports/Sin and Punishment.sh` and `ports/sinandpunishment/`).
+3. Copy your legally obtained `.z64`, `.n64`, or `.v64` ROM into `ports/sinandpunishment/roms/`.
+4. Launch **Sin and Punishment** from your device's Ports menu.
 
 ## Controls
-F1 or Esc opens the settings. Change the controls on the Controls tab.
 
-| | Mouse and keyboard | Controller |
-|---|---|---|
-| Move | Arrow keys | Left stick |
-| Aim | Mouse, or W A S D | Right stick |
-| Fire | Left click / Q | Right trigger |
-| Jump | Right click / R | Left trigger |
-| Aim mode (lock-on / free) | Middle click / Space | A |
-| Start | Enter | Start |
+| Button | Stickless (`Strafe + Shift` Default) | Twin Stick (`2` Analog Sticks) | Menus & Pause |
+|---|---|---|---|
+| **D-Pad** | Strafe L/R (`2x` tap: Roll) | Strafe L/R | Move Cursor / Navigate |
+| **Hold `L1`/`L2` + D-Pad** | Manual Reticle Aim | - | - |
+| **Left Analog** | Aim Assist | Strafe L/R | Move Cursor / Navigate |
+| **Right Analog** | - | Reticle Aim | - |
+| **A (East)** | Fire / Sword Slash | Lock-On | Confirm |
+| **B (South)** | Jump / Double Jump | Melee / Cancel | Back / Cancel |
+| **Y (West)** | Dodge Roll | L Button | - |
+| **X (North)** | Next Target (`L1/L2 + X`: Recenter) | Dodge Roll | - |
+| **L1 / L2** | Aim Shift (Manual Aim while held) | Jump / Double Jump | - |
+| **R1 / R2** | Fire / Sword Slash | Fire / Sword Slash | - |
+| **Start** | Pause | Pause | Start / Unpause |
+| **Select / Menu** | Quick Settings Overlay | Quick Settings Overlay | Quick Settings Overlay |
+| **Select + Start** | Save Config & Exit | Save Config & Exit | Save Config & Exit |
 
-Mouse Aim, Mouse Sensitivity, Joystick Deadzone, Analog Aim and Stick
-Sensitivity are at the top
-of the Controls tab. Mouse buttons, side buttons too, can be bound like keys
-on the keyboard side of the Controls tab. A controller's extra buttons (back
-paddles, L4/R4, M1/M2 and the like) can be bound too, where the controller
-reports them: as paddles, or as a numbered "Button" if SDL doesn't know them.
-Some controllers don't report them at all in XInput mode (like 8BitDo's on
-Windows); there, map them to another button with the controller's own
-software.
+## Building from Source
 
-Rolling is a quick double tap of left or right. **Roll**, **Roll Left** and
-**Roll Right** (unbound at first, at the end of the Controls tab's list) roll
-with one button instead, handy on a light gun with pedals: Roll goes the way
-you're moving, or the way you last moved.
+The root `Makefile` wraps cross-compilation (`aarch64` Ubuntu 20.04 container toolchain for `glibc >= 2.30` compatibility), native `x86_64` host builds, GLES 3.0 renderer unit tests, packaging, and ADB device deployment:
 
-**Two players:** set **Second Player** on the General tab. The next controller
-that presses a button after player 1's becomes player 2, with the same
-controller bindings. **Game's 2-Player Mode** is the game's own (player 1
-moves, player 2 aims and shoots); **Co-op Mod** is for mods that add a second
-player.
+```bash
+# Build aarch64 PortMaster binary and distribution zip (dist/sinandpunishment.zip)
+make build
 
-**Android:** a controller or a handheld's controls work as above. Back opens
-the settings. Touch controls (experimental) are set on the **Touch** tab:
-- **Touch Aim**: Point (the reticle goes where you touch, the default), Drag
-  (like a trackpad) or Off. It works together with a controller.
-- **Fire While Touching** (on by default): fires while your finger is down,
-  so with Point a touch shoots where it lands.
-- **On-screen Buttons**: a stick to move, FIRE, JUMP, AIM, START and MENU.
-  Auto shows them only when no controller is connected.
+# Build native x86_64 Linux GLES3 binary (build-host/SnPRecompiled) and run renderer tests
+make host test
 
-## Texture Packs
-- **RT64 packs** (`.rtz`): install them from the Mods tab.
-- **Rice packs** (emulator `hires_texture` packs): put the pack's folder in the
-  `texture_packs` folder. Graphics > Texture Packs > **Open Folder** opens it.
-  Texture Packs can be turned off there too, before the game starts.
+# Deploy over ADB to a connected handheld (preserves ROMs and saves on SD card)
+make push
 
-Tested with Vanit's English translation pack on the Japanese ROM. If both
-kinds of pack replace the same texture, the RT64 one is used.
+# Inspect device runtime log over ADB
+make logs
+```
 
-On Android, Rice packs can't be installed yet (the app's folder can't be
-opened from a file manager).
-
-## Mods
-Install mods from the Mods tab. To make your own, start from the
-[mod template](https://github.com/wootbeer/snprecomp-mod-template).
-
-## Issues and Limitations
-
-Known:
-- Beta.
-- Widescreen and framerates above 30 fps are experimental. If something looks
-  wrong, check it at Original aspect ratio and Original framerate.
-- A few scenes show sky or nothing at the sides in widescreen, where the game
-  has no scenery past the original 4:3 view.
-- Linux and Steam Deck builds are untested.
-- Android: tested on a Retroid Pocket 6. Touch controls are experimental.
-
-Else:
-- Please see the "Issues" section in GitHub. Screenshots or a short video
-  help a lot.
-- If the game crashes, attach `crash_log.txt` from the game's folder.
-- Android: after a crash, the app offers to share its log the next time it
-  starts. Or long-press the app icon and choose **Share log** at any time.
-
-## Changes
-See [CHANGELOG.md](CHANGELOG.md).
-
-## Building
-See [BUILDING.md](BUILDING.md), and [android/README.md](android/README.md) for
-Android.
+For full manual CMake and `N64Recomp` code-generation steps from a Japanese ROM, see [`portmaster/README.md`](portmaster/README.md).
 
 ## Credits
-- [N64Recomp and N64ModernRuntime](https://github.com/N64Recomp) by Mr-Wiseguy
-  and contributors, which this port is built with
-- [RT64](https://github.com/rt64/rt64) by Dario and contributors, the renderer
-- [RecompFrontend](https://github.com/N64Recomp/RecompFrontend) by the N64Recomp
-  contributors, the launcher and input layer
-- Zoinkity, for the English translation of the game's text
-- [Mouse Injector](https://github.com/garungorp/MouseInjectorDolphinDuck) by
-  Carnivorous, whose Sin and Punishment driver pointed to the reticle in memory
-- The CRT filter is based on Timothy Lottes' CRT shader, and the LCD filter on
-  LCD3x by Gigaherz (both public domain)
-- The Rice texture pack hashing follows RT64's texture_hasher, based on
-  GlideN64 and Rice Video (GPL)
-- Steam artwork from [SteamGridDB](https://www.steamgriddb.com/), downloaded
-  when you use Add to Steam
-- [spimdisasm and rabbitizer](https://github.com/Decompollaborate) for finding
-  function boundaries, and [n64sym](https://github.com/shygoo/n64sym) by shygoo
-  for identifying the N64 SDK's functions
-- The app icon's 罪 is drawn with [Dela Gothic One](https://github.com/syakuzen/DelaGothic)
-  (SIL Open Font License 1.1)
+
+- [**wootbeer/snprecomp**](https://github.com/wootbeer/snprecomp) - Original Sin and Punishment static recompilation, widescreen/HUD patches, and `snp` runtime hooks
+- [**N64Recomp & N64ModernRuntime**](https://github.com/N64Recomp) by Mr-Wiseguy and contributors - Static N64/RSP recompilers and modern runtime
+- **Zoinkity** - English fan translation patch
+- [**Mouse Injector**](https://github.com/garungorp/MouseInjectorDolphinDuck) by Carnivorous - Reticle memory documentation
+- [**spimdisasm & rabbitizer**](https://github.com/Decompollaborate) and [**n64sym**](https://github.com/shygoo/n64sym) - MIPS disassembly and SDK symbol analysis
 
 ## License
-The project's own code is GPL-3.0; see [COPYING](COPYING). The game itself
-remains the property of its rights holders.
+
+GPL-3.0 - see [COPYING](COPYING) and [`portmaster/sinandpunishment/licenses/`](portmaster/sinandpunishment/licenses/). No Nintendo 64 ROM or copyrighted game assets are included in this repository.
