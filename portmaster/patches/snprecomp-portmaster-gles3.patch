@@ -5539,10 +5539,10 @@ index 0000000..23ffec1
 +} // namespace snp::handheld
 diff --git a/src/handheld/handheld_font.h b/src/handheld/handheld_font.h
 new file mode 100644
-index 0000000..696d62d
+index 0000000..7427b82
 --- /dev/null
 +++ b/src/handheld/handheld_font.h
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,227 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -5646,6 +5646,127 @@ index 0000000..696d62d
 +    { 0x18, 0x18, 0x18, 0x00, 0x18, 0x18, 0x18, 0x00},   // U+007C (|)
 +    { 0x07, 0x0C, 0x0C, 0x38, 0x0C, 0x0C, 0x07, 0x00},   // U+007D (})
 +    { 0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // U+007E (~)
++};
++
++// Sin & Punishment N64 Pause Menu Cyber-Stencil 8x8 glyph bitmaps (ASCII 0x20..0x7E)
++constexpr uint8_t SNP_STENCIL_FONT[95][8] = {
++    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // U+0020 (space)
++    { 0x00, 0x03, 0x03, 0x03, 0x03, 0x00, 0x03, 0x00 }, // U+0021 (!)
++    { 0x00, 0x1B, 0x1B, 0x00, 0x00, 0x00, 0x00, 0x00 }, // U+0022 (")
++    { 0x00, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x00, 0x00 }, // U+0023 (#)
++    { 0x00, 0x1E, 0x0B, 0x1E, 0x34, 0x1E, 0x04, 0x00 }, // U+0024 ($)
++    { 0x00, 0x33, 0x18, 0x0C, 0x06, 0x33, 0x00, 0x00 }, // U+0025 (%)
++    { 0x00, 0x0E, 0x1B, 0x0E, 0x3B, 0x1B, 0x2E, 0x00 }, // U+0026 (&)
++    { 0x00, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00 }, // U+0027 (')
++    { 0x00, 0x06, 0x03, 0x03, 0x03, 0x03, 0x06, 0x00 }, // U+0028 (()
++    { 0x00, 0x03, 0x06, 0x06, 0x06, 0x06, 0x03, 0x00 }, // U+0029 ())
++    { 0x00, 0x00, 0x12, 0x0C, 0x3F, 0x0C, 0x12, 0x00 }, // U+002A (*)
++    { 0x00, 0x00, 0x04, 0x0E, 0x04, 0x00, 0x00, 0x00 }, // U+002B (+)
++    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x03, 0x00 }, // U+002C (,)
++    { 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x00 }, // U+002D (-)
++    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x03, 0x00 }, // U+002E (.)
++    { 0x00, 0x30, 0x18, 0x0C, 0x06, 0x03, 0x01, 0x00 }, // U+002F (/)
++    { 0x00, 0x1E, 0x33, 0x3B, 0x37, 0x33, 0x1E, 0x00 }, // U+0030 (0)
++    { 0x00, 0x06, 0x07, 0x06, 0x06, 0x06, 0x0F, 0x00 }, // U+0031 (1)
++    { 0x00, 0x1F, 0x30, 0x1E, 0x03, 0x03, 0x3F, 0x00 }, // U+0032 (2)
++    { 0x00, 0x1F, 0x30, 0x1E, 0x30, 0x30, 0x1F, 0x00 }, // U+0033 (3)
++    { 0x00, 0x38, 0x34, 0x32, 0x3F, 0x30, 0x30, 0x00 }, // U+0034 (4)
++    { 0x00, 0x3F, 0x03, 0x1F, 0x30, 0x30, 0x1F, 0x00 }, // U+0035 (5)
++    { 0x00, 0x1E, 0x03, 0x1F, 0x33, 0x33, 0x1E, 0x00 }, // U+0036 (6)
++    { 0x00, 0x3F, 0x30, 0x18, 0x0C, 0x0C, 0x0C, 0x00 }, // U+0037 (7)
++    { 0x00, 0x1E, 0x33, 0x1E, 0x33, 0x33, 0x1E, 0x00 }, // U+0038 (8)
++    { 0x00, 0x1E, 0x33, 0x3E, 0x30, 0x30, 0x1E, 0x00 }, // U+0039 (9)
++    { 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x00 }, // U+003A (:)
++    { 0x00, 0x00, 0x06, 0x00, 0x00, 0x06, 0x03, 0x00 }, // U+003B (;)
++    { 0x00, 0x18, 0x0C, 0x06, 0x06, 0x0C, 0x18, 0x00 }, // U+003C (<)
++    { 0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00, 0x00 }, // U+003D (=)
++    { 0x00, 0x03, 0x06, 0x0C, 0x0C, 0x06, 0x03, 0x00 }, // U+003E (>)
++    { 0x00, 0x1F, 0x30, 0x1C, 0x0C, 0x00, 0x0C, 0x00 }, // U+003F (?)
++    { 0x00, 0x1E, 0x33, 0x3B, 0x3B, 0x03, 0x1E, 0x00 }, // U+0040 (@)
++    { 0x00, 0x38, 0x34, 0x32, 0x33, 0x33, 0x33, 0x00 }, // U+0041 (A)
++    { 0x00, 0x1F, 0x30, 0x1F, 0x33, 0x30, 0x1F, 0x00 }, // U+0042 (B)
++    { 0x00, 0x3F, 0x03, 0x03, 0x03, 0x03, 0x3F, 0x00 }, // U+0043 (C)
++    { 0x00, 0x1F, 0x30, 0x33, 0x33, 0x30, 0x1F, 0x00 }, // U+0044 (D)
++    { 0x00, 0x3F, 0x03, 0x1F, 0x03, 0x03, 0x3F, 0x00 }, // U+0045 (E)
++    { 0x00, 0x3F, 0x03, 0x1F, 0x03, 0x03, 0x03, 0x00 }, // U+0046 (F)
++    { 0x00, 0x3F, 0x03, 0x03, 0x33, 0x33, 0x3F, 0x00 }, // U+0047 (G)
++    { 0x00, 0x33, 0x33, 0x3F, 0x33, 0x33, 0x33, 0x00 }, // U+0048 (H)
++    { 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x00 }, // U+0049 (I)
++    { 0x00, 0x30, 0x30, 0x30, 0x33, 0x33, 0x1E, 0x00 }, // U+004A (J)
++    { 0x00, 0x33, 0x1B, 0x0F, 0x1B, 0x33, 0x33, 0x00 }, // U+004B (K)
++    { 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x3F, 0x00 }, // U+004C (L)
++    { 0x00, 0x21, 0x33, 0x3F, 0x33, 0x33, 0x33, 0x00 }, // U+004D (M)
++    { 0x00, 0x33, 0x37, 0x3B, 0x33, 0x33, 0x33, 0x00 }, // U+004E (N)
++    { 0x00, 0x1E, 0x33, 0x33, 0x33, 0x33, 0x1E, 0x00 }, // U+004F (O)
++    { 0x00, 0x1F, 0x30, 0x1F, 0x03, 0x03, 0x03, 0x00 }, // U+0050 (P)
++    { 0x00, 0x1E, 0x33, 0x33, 0x3B, 0x33, 0x3E, 0x00 }, // U+0051 (Q)
++    { 0x00, 0x3F, 0x30, 0x1F, 0x33, 0x33, 0x33, 0x00 }, // U+0052 (R)
++    { 0x00, 0x3F, 0x03, 0x3F, 0x30, 0x30, 0x3F, 0x00 }, // U+0053 (S)
++    { 0x00, 0x3F, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x00 }, // U+0054 (T)
++    { 0x00, 0x33, 0x33, 0x33, 0x33, 0x33, 0x1E, 0x00 }, // U+0055 (U)
++    { 0x00, 0x33, 0x33, 0x33, 0x36, 0x3C, 0x38, 0x00 }, // U+0056 (V)
++    { 0x00, 0x33, 0x33, 0x33, 0x3F, 0x3F, 0x12, 0x00 }, // U+0057 (W)
++    { 0x00, 0x33, 0x1E, 0x0C, 0x0C, 0x1E, 0x33, 0x00 }, // U+0058 (X)
++    { 0x00, 0x33, 0x33, 0x1E, 0x0C, 0x0C, 0x0C, 0x00 }, // U+0059 (Y)
++    { 0x00, 0x3F, 0x30, 0x1C, 0x06, 0x03, 0x3F, 0x00 }, // U+005A (Z)
++    { 0x00, 0x0F, 0x03, 0x03, 0x03, 0x03, 0x0F, 0x00 }, // U+005B ([)
++    { 0x00, 0x01, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x00 }, // U+005C (backslash)
++    { 0x00, 0x0F, 0x0C, 0x0C, 0x0C, 0x0C, 0x0F, 0x00 }, // U+005D (])
++    { 0x00, 0x0C, 0x1E, 0x33, 0x00, 0x00, 0x00, 0x00 }, // U+005E (^)
++    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3F, 0x00 }, // U+005F (_)
++    { 0x00, 0x03, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00 }, // U+0060 (`)
++    { 0x00, 0x00, 0x1C, 0x1A, 0x1B, 0x1F, 0x1B, 0x00 }, // U+0061 (a)
++    { 0x00, 0x00, 0x0F, 0x18, 0x0F, 0x1B, 0x0F, 0x00 }, // U+0062 (b)
++    { 0x00, 0x00, 0x1F, 0x03, 0x03, 0x03, 0x1F, 0x00 }, // U+0063 (c)
++    { 0x00, 0x00, 0x0F, 0x18, 0x1B, 0x1B, 0x0F, 0x00 }, // U+0064 (d)
++    { 0x00, 0x00, 0x1F, 0x03, 0x0F, 0x03, 0x1F, 0x00 }, // U+0065 (e)
++    { 0x00, 0x00, 0x1F, 0x03, 0x0F, 0x03, 0x03, 0x00 }, // U+0066 (f)
++    { 0x00, 0x00, 0x1F, 0x03, 0x1B, 0x1B, 0x1F, 0x00 }, // U+0067 (g)
++    { 0x00, 0x00, 0x1B, 0x1B, 0x1F, 0x1B, 0x1B, 0x00 }, // U+0068 (h)
++    { 0x00, 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x00 }, // U+0069 (i)
++    { 0x00, 0x00, 0x18, 0x18, 0x18, 0x1B, 0x0E, 0x00 }, // U+006A (j)
++    { 0x00, 0x00, 0x1B, 0x0F, 0x07, 0x0F, 0x1B, 0x00 }, // U+006B (k)
++    { 0x00, 0x00, 0x03, 0x03, 0x03, 0x03, 0x1F, 0x00 }, // U+006C (l)
++    { 0x00, 0x00, 0x11, 0x1B, 0x1F, 0x1B, 0x1B, 0x00 }, // U+006D (m)
++    { 0x00, 0x00, 0x1B, 0x1F, 0x1F, 0x1B, 0x1B, 0x00 }, // U+006E (n)
++    { 0x00, 0x00, 0x0E, 0x1B, 0x1B, 0x1B, 0x0E, 0x00 }, // U+006F (o)
++    { 0x00, 0x00, 0x0F, 0x18, 0x0F, 0x03, 0x03, 0x00 }, // U+0070 (p)
++    { 0x00, 0x00, 0x0E, 0x1B, 0x1B, 0x0E, 0x18, 0x00 }, // U+0071 (q)
++    { 0x00, 0x00, 0x1F, 0x18, 0x0F, 0x1B, 0x1B, 0x00 }, // U+0072 (r)
++    { 0x00, 0x00, 0x1F, 0x03, 0x1F, 0x18, 0x1F, 0x00 }, // U+0073 (s)
++    { 0x00, 0x00, 0x1F, 0x04, 0x04, 0x04, 0x04, 0x00 }, // U+0074 (t)
++    { 0x00, 0x00, 0x1B, 0x1B, 0x1B, 0x1B, 0x0E, 0x00 }, // U+0075 (u)
++    { 0x00, 0x00, 0x1B, 0x1B, 0x1B, 0x1E, 0x0C, 0x00 }, // U+0076 (v)
++    { 0x00, 0x00, 0x1B, 0x1B, 0x1F, 0x1F, 0x11, 0x00 }, // U+0077 (w)
++    { 0x00, 0x00, 0x1B, 0x0E, 0x04, 0x0E, 0x1B, 0x00 }, // U+0078 (x)
++    { 0x00, 0x00, 0x1B, 0x1B, 0x0E, 0x04, 0x04, 0x00 }, // U+0079 (y)
++    { 0x00, 0x00, 0x1F, 0x18, 0x0E, 0x03, 0x1F, 0x00 }, // U+007A (z)
++    { 0x00, 0x1C, 0x06, 0x07, 0x06, 0x06, 0x1C, 0x00 }, // U+007B ({)
++    { 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x00 }, // U+007C (|)
++    { 0x00, 0x07, 0x0C, 0x1C, 0x0C, 0x0C, 0x07, 0x00 }, // U+007D (})
++    { 0x00, 0x00, 0x16, 0x19, 0x00, 0x00, 0x00, 0x00 }, // U+007E (~)
++};
++
++// Proportional horizontal advance in 1x N64 pixels for SNP_STENCIL_FONT (ASCII 0x20..0x7E)
++constexpr uint8_t SNP_STENCIL_ADV[95] = {
++     4,  4,  7,  7,  8,  8,  8,  4,  5,  5,  8,  6,  5,  7,  4,  8,
++     8,  6,  8,  8,  8,  8,  8,  8,  8,  8,  4,  5,  7,  7,  6,  8,
++     8,  8,  8,  8,  8,  8,  8,  8,  8,  4,  8,  8,  8,  8,  8,  8,
++     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  6,  8,  6,  8,  8,
++     5,  6,  6,  6,  6,  6,  6,  6,  6,  3,  6,  6,  6,  6,  6,  6,
++     6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  7,  4,  7,  7,
++};
++
++// 6-row N64 Pause Menu metallic horizon-gold bounce-light palette (rows 0..7)
++constexpr uint8_t SNP_GOLD_ROWS_RGB[8][3] = {
++    { 255, 255, 230 },
++    { 255, 255, 230 },
++    { 255, 205, 131 },
++    { 255, 164,  32 },
++    { 189, 131,  16 },
++    { 156, 115,   8 },
++    { 255, 180,  82 },
++    { 189, 131,  16 },
 +};
 +
 +} // namespace snp::handheld
@@ -7306,10 +7427,10 @@ index 0000000..05e2614
 +}
 diff --git a/src/handheld/handheld_overlay.cpp b/src/handheld/handheld_overlay.cpp
 new file mode 100644
-index 0000000..92f45de
+index 0000000..9474895
 --- /dev/null
 +++ b/src/handheld/handheld_overlay.cpp
-@@ -0,0 +1,964 @@
+@@ -0,0 +1,1277 @@
 +#include "handheld_overlay.h"
 +
 +#include <algorithm>
@@ -7342,6 +7463,28 @@ index 0000000..92f45de
 +constexpr float FONT_CHAR_HEIGHT = 8.0f;
 +constexpr float SOLID_UV_U = 127.5f / 128.0f;
 +constexpr float SOLID_UV_V = 63.5f / 64.0f;
++
++constexpr float SNP_FONT_CHAR_WIDTH = 8.0f;
++constexpr float SNP_FONT_CHAR_HEIGHT = 8.0f;
++constexpr float SNP_FONT_TEX_SIZE = 128.0f;
++constexpr float SNP_FONT_GOLD_ROW_OFFSET = 64.0f;
++constexpr float SNP_SOLID_PIXEL_X = 127.0f;
++constexpr float SNP_SOLID_PIXEL_Y = 63.0f;
++constexpr float SNP_SOLID_UV_U = (SNP_SOLID_PIXEL_X + 0.5f) / SNP_FONT_TEX_SIZE;
++constexpr float SNP_SOLID_UV_V = (SNP_SOLID_PIXEL_Y + 0.5f) / SNP_FONT_TEX_SIZE;
++
++constexpr float TOAST_SLIDE_IN_DURATION = 0.35f;
++constexpr float TOAST_FADE_OUT_DURATION = 0.50f;
++constexpr float TOAST_SLIDE_IN_OFFSET = -320.0f;
++constexpr float TOAST_FADE_OUT_OFFSET = -40.0f;
++constexpr float TOAST_BASE_HEIGHT = 480.0f;
++constexpr float TOAST_CARD_WIDTH = 476.0f;
++constexpr float TOAST_CARD_HEIGHT = 74.0f;
++constexpr float TOAST_MARGIN = 14.0f;
++constexpr float TOAST_BADGE_SIZE = 48.0f;
++constexpr float TOAST_BADGE_PAD_LEFT = 11.0f;
++constexpr float TOAST_BADGE_PAD_RIGHT = 13.0f;
++constexpr float TOAST_CARD_PAD_RIGHT = 12.0f;
 +
 +enum class MenuRow {
 +    ControlScheme = 0,
@@ -7402,7 +7545,10 @@ index 0000000..92f45de
 +GLuint s_program = 0;
 +GLuint s_vao = 0;
 +GLuint s_vbo = 0;
++GLuint s_toast_vao = 0;
++GLuint s_toast_vbo = 0;
 +GLuint s_font_texture = 0;
++GLuint s_snp_font_texture = 0;
 +GLuint s_toast_badge_texture = 0;
 +std::vector<uint8_t> s_last_badge_pixels;
 +GLint s_loc_screen_size = -1;
@@ -7569,21 +7715,26 @@ index 0000000..92f45de
 +    s_loc_screen_size = gl::glGetUniformLocation(s_program, "u_screen_size");
 +    s_loc_texture = gl::glGetUniformLocation(s_program, "u_texture");
 +
-+    gl::glGenVertexArrays(1, &s_vao);
-+    gl::glGenBuffers(1, &s_vbo);
++    auto init_vertex_array = [](GLuint& vao, GLuint& vbo) {
++        gl::glGenVertexArrays(1, &vao);
++        gl::glGenBuffers(1, &vbo);
 +
-+    gl::glBindVertexArray(s_vao);
-+    gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
++        gl::glBindVertexArray(vao);
++        gl::glBindBuffer(GL_ARRAY_BUFFER, vbo);
 +
-+    gl::glEnableVertexAttribArray(0);
-+    gl::glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(0));
-+    gl::glEnableVertexAttribArray(1);
-+    gl::glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(2 * sizeof(float)));
-+    gl::glEnableVertexAttribArray(2);
-+    gl::glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(4 * sizeof(float)));
++        gl::glEnableVertexAttribArray(0);
++        gl::glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(0));
++        gl::glEnableVertexAttribArray(1);
++        gl::glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(2 * sizeof(float)));
++        gl::glEnableVertexAttribArray(2);
++        gl::glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(4 * sizeof(float)));
 +
-+    gl::glBindVertexArray(0);
-+    gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
++        gl::glBindVertexArray(0);
++        gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
++    };
++
++    init_vertex_array(s_vao, s_vbo);
++    init_vertex_array(s_toast_vao, s_toast_vbo);
 +
 +    // Build 128x64 font texture containing 95 ASCII glyphs plus a solid white pixel at (127, 63)
 +    std::vector<uint8_t> texels(128 * 64 * 4, 0);
@@ -7619,6 +7770,52 @@ index 0000000..92f45de
 +    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 +    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 +    gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 128, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, texels.data());
++    gl::glBindTexture(GL_TEXTURE_2D, 0);
++
++    // Build 128x128 S&P Cyber-Stencil font texture (top: white glyphs, bottom: gold glyphs)
++    std::vector<uint8_t> snp_texels(128 * 128 * 4, 0);
++    for (int g = 0; g < 95; ++g) {
++        int cell_x = (g % 16) * 8;
++        int cell_y = (g / 16) * 8;
++        for (int y = 0; y < 8; ++y) {
++            uint8_t row_byte = SNP_STENCIL_FONT[g][y];
++            for (int x = 0; x < 8; ++x) {
++                bool pixel_on = (row_byte >> x) & 1;
++                int px = cell_x + x;
++
++                // Top half: solid white glyphs for tinted outlines and shadows
++                int py_top = cell_y + y;
++                int offset_top = (py_top * 128 + px) * 4;
++                snp_texels[offset_top + 0] = 255;
++                snp_texels[offset_top + 1] = 255;
++                snp_texels[offset_top + 2] = 255;
++                snp_texels[offset_top + 3] = pixel_on ? 255 : 0;
++
++                // Bottom half: metallic horizon gold glyphs
++                int py_gold = 64 + cell_y + y;
++                int offset_gold = (py_gold * 128 + px) * 4;
++                snp_texels[offset_gold + 0] = SNP_GOLD_ROWS_RGB[y][0];
++                snp_texels[offset_gold + 1] = SNP_GOLD_ROWS_RGB[y][1];
++                snp_texels[offset_gold + 2] = SNP_GOLD_ROWS_RGB[y][2];
++                snp_texels[offset_gold + 3] = pixel_on ? 255 : 0;
++            }
++        }
++    }
++
++    // Set pixel (127, 63) to solid opaque white for untextured primitives
++    int snp_solid_offset = (static_cast<int>(SNP_SOLID_PIXEL_Y) * 128 + static_cast<int>(SNP_SOLID_PIXEL_X)) * 4;
++    snp_texels[snp_solid_offset + 0] = 255;
++    snp_texels[snp_solid_offset + 1] = 255;
++    snp_texels[snp_solid_offset + 2] = 255;
++    snp_texels[snp_solid_offset + 3] = 255;
++
++    gl::glGenTextures(1, &s_snp_font_texture);
++    gl::glBindTexture(GL_TEXTURE_2D, s_snp_font_texture);
++    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, snp_texels.data());
 +    gl::glBindTexture(GL_TEXTURE_2D, 0);
 +
 +    s_gl_initialized = true;
@@ -7937,6 +8134,9 @@ index 0000000..92f45de
 +        if (SDL_GL_GetCurrentContext() != nullptr) {
 +            if (s_toast_badge_texture) gl::glDeleteTextures(1, &s_toast_badge_texture);
 +            if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
++            if (s_snp_font_texture) gl::glDeleteTextures(1, &s_snp_font_texture);
++            if (s_toast_vbo) gl::glDeleteBuffers(1, &s_toast_vbo);
++            if (s_toast_vao) gl::glDeleteVertexArrays(1, &s_toast_vao);
 +            if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
 +            if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
 +            if (s_program) gl::glDeleteProgram(s_program);
@@ -7944,6 +8144,9 @@ index 0000000..92f45de
 +        s_toast_badge_texture = 0;
 +        s_last_badge_pixels.clear();
 +        s_font_texture = 0;
++        s_snp_font_texture = 0;
++        s_toast_vbo = 0;
++        s_toast_vao = 0;
 +        s_vbo = 0;
 +        s_vao = 0;
 +        s_program = 0;
@@ -8026,7 +8229,8 @@ index 0000000..92f45de
 +    static std::string s_last_ra_snapshot;
 +    std::string ra_snapshot = ra_get_status_text() + "|" +
 +                              (ra_is_syncing() ? "1" : "0") + "|" +
-+                              (ra_is_offline_mode() ? "1" : "0");
++                              (ra_is_offline_mode() ? "1" : "0") + "|" +
++                              std::to_string(ra_get_pending_sync_count());
 +    if (ra_snapshot != s_last_ra_snapshot) {
 +        s_last_ra_snapshot = std::move(ra_snapshot);
 +        s_mesh_dirty = true;
@@ -8080,119 +8284,347 @@ index 0000000..92f45de
 +    gl::glUseProgram(0);
 +}
 +
++std::string to_upper_ascii(const std::string& str) {
++    std::string res;
++    res.reserve(str.size());
++    for (char c : str) {
++        res.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
++    }
++    return res;
++}
++
++float measure_snp_text(const std::string& text, float scale_x, float tracking) {
++    if (text.empty()) return 0.0f;
++    float total = 0.0f;
++    for (size_t i = 0; i < text.size(); ++i) {
++        char ch = text[i];
++        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
++        float adv = static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x;
++        total += adv + (i + 1 < text.size() ? tracking : 0.0f);
++    }
++    return total;
++}
++
++std::string truncate_snp_text(const std::string& text, float scale_x, float tracking, float max_w) {
++    if (max_w <= 0.0f || text.empty()) return "";
++    if (measure_snp_text(text, scale_x, tracking) <= max_w) {
++        return text;
++    }
++    float ell_w = measure_snp_text("...", scale_x, tracking);
++    std::string trimmed;
++    float cur = 0.0f;
++    for (char ch : text) {
++        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
++        float cw = static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
++        if (cur + cw + ell_w > max_w) {
++            break;
++        }
++        trimmed.push_back(ch);
++        cur += cw;
++    }
++    while (!trimmed.empty() && trimmed.back() == ' ') {
++        trimmed.pop_back();
++    }
++    return trimmed + "...";
++}
++
++void add_solid_rect_to(std::vector<OverlayVertex>& list,
++                       float x0, float y0, float x1, float y1,
++                       const ColorRgba& c) {
++    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
++    list.push_back({x1, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
++    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
++
++    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
++    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
++    list.push_back({x0, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
++}
++
++void add_vgrad_rect_to(std::vector<OverlayVertex>& list,
++                       float x0, float y0, float x1, float y1,
++                       const ColorRgba& c_top, const ColorRgba& c_bot) {
++    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_top.r, c_top.g, c_top.b, c_top.a});
++    list.push_back({x1, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_top.r, c_top.g, c_top.b, c_top.a});
++    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_bot.r, c_bot.g, c_bot.b, c_bot.a});
++
++    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_top.r, c_top.g, c_top.b, c_top.a});
++    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_bot.r, c_bot.g, c_bot.b, c_bot.a});
++    list.push_back({x0, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_bot.r, c_bot.g, c_bot.b, c_bot.a});
++}
++
++void add_triangle_to(std::vector<OverlayVertex>& list,
++                     float x0, float y0, const ColorRgba& c0,
++                     float x1, float y1, const ColorRgba& c1,
++                     float x2, float y2, const ColorRgba& c2) {
++    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c0.r, c0.g, c0.b, c0.a});
++    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c1.r, c1.g, c1.b, c1.a});
++    list.push_back({x2, y2, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c2.r, c2.g, c2.b, c2.a});
++}
++
++void add_badge_quad(std::vector<OverlayVertex>& list,
++                    float bx0, float by0, float bx1, float by1, float alpha) {
++    ColorRgba c{1.0f, 1.0f, 1.0f, alpha};
++    list.push_back({bx0, by0, 0.0f, 0.0f, c.r, c.g, c.b, c.a});
++    list.push_back({bx1, by0, 1.0f, 0.0f, c.r, c.g, c.b, c.a});
++    list.push_back({bx1, by1, 1.0f, 1.0f, c.r, c.g, c.b, c.a});
++
++    list.push_back({bx0, by0, 0.0f, 0.0f, c.r, c.g, c.b, c.a});
++    list.push_back({bx1, by1, 1.0f, 1.0f, c.r, c.g, c.b, c.a});
++    list.push_back({bx0, by1, 0.0f, 1.0f, c.r, c.g, c.b, c.a});
++}
++
++void add_snp_glyph(std::vector<OverlayVertex>& list,
++                   float x, float y, float scale_x, float scale_y,
++                   char ch, bool use_gold, const ColorRgba& c) {
++    if (ch < 32 || ch > 126) ch = '?';
++    int glyph_idx = ch - 32;
++    int col = glyph_idx % 16;
++    int row = glyph_idx / 16;
++    float v_offset = use_gold ? SNP_FONT_GOLD_ROW_OFFSET : 0.0f;
++
++    float u0 = (static_cast<float>(col) * SNP_FONT_CHAR_WIDTH) / SNP_FONT_TEX_SIZE;
++    float v0 = (v_offset + static_cast<float>(row) * SNP_FONT_CHAR_HEIGHT) / SNP_FONT_TEX_SIZE;
++    float u1 = ((static_cast<float>(col) + 1.0f) * SNP_FONT_CHAR_WIDTH) / SNP_FONT_TEX_SIZE;
++    float v1 = (v_offset + (static_cast<float>(row) + 1.0f) * SNP_FONT_CHAR_HEIGHT) / SNP_FONT_TEX_SIZE;
++
++    float w = SNP_FONT_CHAR_WIDTH * scale_x;
++    float h = SNP_FONT_CHAR_HEIGHT * scale_y;
++
++    list.push_back({x, y, u0, v0, c.r, c.g, c.b, c.a});
++    list.push_back({x + w, y, u1, v0, c.r, c.g, c.b, c.a});
++    list.push_back({x + w, y + h, u1, v1, c.r, c.g, c.b, c.a});
++
++    list.push_back({x, y, u0, v0, c.r, c.g, c.b, c.a});
++    list.push_back({x + w, y + h, u1, v1, c.r, c.g, c.b, c.a});
++    list.push_back({x, y + h, u0, v1, c.r, c.g, c.b, c.a});
++}
++
++void add_snp_text(std::vector<OverlayVertex>& list,
++                  float x, float y, float scale_x, float scale_y,
++                  const std::string& text, float tracking,
++                  bool outline_8way, int outline_px,
++                  const ColorRgba* outline_color,
++                  bool use_gold, const ColorRgba& text_color,
++                  float max_w) {
++    std::string clipped = truncate_snp_text(text, scale_x, tracking, max_w);
++    if (clipped.empty()) return;
++
++    if (outline_color != nullptr) {
++        if (outline_8way) {
++            for (int dy = -outline_px; dy <= outline_px; ++dy) {
++                for (int dx = -outline_px; dx <= outline_px; ++dx) {
++                    if (dx == 0 && dy == 0) continue;
++                    float cx = x + static_cast<float>(dx);
++                    for (char ch : clipped) {
++                        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
++                        add_snp_glyph(list, cx, y + static_cast<float>(dy), scale_x, scale_y, ch, false, *outline_color);
++                        cx += static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
++                    }
++                }
++            }
++        } else {
++            constexpr int OFFSETS[6][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {1, 1}, {0, 2}};
++            float step = static_cast<float>(outline_px);
++            for (const auto& off : OFFSETS) {
++                float cx = x + static_cast<float>(off[0]) * step;
++                for (char ch : clipped) {
++                    int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
++                    add_snp_glyph(list, cx, y + static_cast<float>(off[1]) * step, scale_x, scale_y, ch, false, *outline_color);
++                    cx += static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
++                }
++            }
++        }
++    }
++
++    float cx = x;
++    for (char ch : clipped) {
++        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
++        add_snp_glyph(list, cx, y, scale_x, scale_y, ch, use_gold, text_color);
++        cx += static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
++    }
++}
++
++void calculate_toast_animation(float elapsed, float duration, float& out_alpha, float& out_x_slide) {
++    out_alpha = 1.0f;
++    out_x_slide = 0.0f;
++    if (elapsed < TOAST_SLIDE_IN_DURATION) {
++        float t = elapsed / TOAST_SLIDE_IN_DURATION;
++        out_alpha = t;
++        out_x_slide = (1.0f - t) * TOAST_SLIDE_IN_OFFSET;
++    } else if (elapsed > duration - TOAST_FADE_OUT_DURATION) {
++        float t = std::clamp((duration - elapsed) / TOAST_FADE_OUT_DURATION, 0.0f, 1.0f);
++        out_alpha = t;
++        out_x_slide = (1.0f - t) * TOAST_FADE_OUT_OFFSET;
++    }
++}
++
++void build_toast_badge_well(std::vector<OverlayVertex>& toast_verts,
++                           std::vector<OverlayVertex>& badge_verts,
++                           const RaToastItem& toast,
++                           float x0, float y0, float card_h, float s,
++                           float alpha, float& out_bx1) {
++    float bsize = TOAST_BADGE_SIZE * s;
++    float bx0 = x0 + TOAST_BADGE_PAD_LEFT * s;
++    float by0 = y0 + (card_h - bsize) * 0.5f;
++    float bx1 = bx0 + bsize;
++    float by1 = by0 + bsize;
++    out_bx1 = bx1;
++
++    ColorRgba crimson_border{115.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.98f * alpha};
++    if (toast.accent_kind == 3) {
++        crimson_border = ColorRgba{185.0f / 255.0f, 28.0f / 255.0f, 12.0f / 255.0f, 0.98f * alpha};
++    }
++    ColorRgba oxblood_fill{24.0f / 255.0f, 0.0f, 0.0f, 0.96f * alpha};
++
++    add_solid_rect_to(toast_verts, bx0 - 3.0f * s, by0 - 3.0f * s, bx1 + 3.0f * s, by1 + 3.0f * s, crimson_border);
++    add_solid_rect_to(toast_verts, bx0 - 1.0f * s, by0 - 1.0f * s, bx1 + 1.0f * s, by1 + 1.0f * s, oxblood_fill);
++
++    if (!toast.rgba_pixels.empty()) {
++        add_badge_quad(badge_verts, bx0, by0, bx1, by1, alpha);
++    }
++}
++
++void build_toast_header_banner(std::vector<OverlayVertex>& toast_verts,
++                              const RaToastItem& toast,
++                              float tx, float y0, float x1, float s, float alpha) {
++    float avail = (x1 - TOAST_CARD_PAD_RIGHT * s) - tx;
++    std::string hdr_text = to_upper_ascii(toast.title);
++    float hdr_sx = 1.5f * s;
++    float hdr_sy = 1.34f * s;
++    float box_pad_x = 9.0f * s;
++    float hdr_w = measure_snp_text(hdr_text, hdr_sx, 1.0f * s);
++    if (hdr_w + box_pad_x * 2.0f > avail) {
++        hdr_sx = 1.0f * s;
++        hdr_sy = 1.0f * s;
++        hdr_w = measure_snp_text(hdr_text, hdr_sx, 1.0f * s);
++    }
++    float hbox_x0 = tx;
++    float hbox_x1 = std::min(x1 - TOAST_CARD_PAD_RIGHT * s, tx + hdr_w + box_pad_x * 2.0f);
++    float hbox_y0 = y0 + 6.0f * s;
++    float hbox_y1 = y0 + 25.0f * s;
++
++    ColorRgba crimson_border{115.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.98f * alpha};
++    if (toast.accent_kind == 3) {
++        crimson_border = ColorRgba{185.0f / 255.0f, 28.0f / 255.0f, 12.0f / 255.0f, 0.98f * alpha};
++    }
++    ColorRgba oxblood_fill{24.0f / 255.0f, 0.0f, 0.0f, 0.96f * alpha};
++
++    add_solid_rect_to(toast_verts, hbox_x0, hbox_y0, hbox_x1, hbox_y1, crimson_border);
++    add_solid_rect_to(toast_verts, hbox_x0 + 2.0f * s, hbox_y0 + 2.0f * s,
++                      hbox_x1 - 2.0f * s, hbox_y1 - 2.0f * s, oxblood_fill);
++
++    ColorRgba crimson_outline{148.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.98f * alpha};
++    ColorRgba white_tint{1.0f, 1.0f, 1.0f, alpha};
++    int outline_px = std::max(1, static_cast<int>(std::round(1.0f * s)));
++    add_snp_text(toast_verts,
++                 hbox_x0 + box_pad_x, hbox_y0 + 4.0f * s,
++                 hdr_sx, hdr_sy,
++                 hdr_text, 1.0f * s,
++                 true, outline_px, &crimson_outline,
++                 true, white_tint,
++                 (hbox_x1 - hbox_x0) - box_pad_x * 1.5f);
++}
++
++void build_toast_selection_cursor(std::vector<OverlayVertex>& toast_verts,
++                                 float tx, float row2_y, float s, float alpha) {
++    ColorRgba bronze_shadow{65.0f / 255.0f, 32.0f / 255.0f, 0.0f, 0.95f * alpha};
++    ColorRgba cursor_gold_top{1.0f, 1.0f, 0.92f, alpha};
++    ColorRgba cursor_gold_mid{1.0f, 0.85f, 0.50f, alpha};
++    ColorRgba cursor_gold_bot{1.0f, 0.72f, 0.28f, alpha};
++
++    float cy_top = row2_y + 2.0f * s;
++    float cy_mid = row2_y + 8.0f * s;
++    float cy_bot = row2_y + 14.0f * s;
++
++    // Drop shadow for '|>' cursor
++    add_solid_rect_to(toast_verts, tx + 1.0f * s, cy_top + 1.0f * s, tx + 3.0f * s, cy_bot + 1.0f * s, bronze_shadow);
++    add_triangle_to(toast_verts,
++                    tx + 5.0f * s, cy_top + 1.0f * s, bronze_shadow,
++                    tx + 11.0f * s, cy_mid + 1.0f * s, bronze_shadow,
++                    tx + 5.0f * s, cy_bot + 1.0f * s, bronze_shadow);
++
++    // Foreground '|>' cursor
++    add_vgrad_rect_to(toast_verts, tx, cy_top, tx + 2.0f * s, cy_bot, cursor_gold_top, cursor_gold_bot);
++    add_triangle_to(toast_verts,
++                    tx + 4.0f * s, cy_top, cursor_gold_top,
++                    tx + 10.0f * s, cy_mid, cursor_gold_mid,
++                    tx + 4.0f * s, cy_bot, cursor_gold_bot);
++}
++
++void build_toast_subtitle_row(std::vector<OverlayVertex>& toast_verts,
++                              const RaToastItem& toast,
++                              float tx, float row2_y, float x1, float s, float alpha) {
++    float avail = (x1 - TOAST_CARD_PAD_RIGHT * s) - tx;
++    build_toast_selection_cursor(toast_verts, tx, row2_y, s, alpha);
++
++    std::string sub_upper = to_upper_ascii(toast.subtitle);
++    float sub_scale = (sub_upper.length() <= 22 ? 2.0f : 1.0f) * s;
++    ColorRgba bronze_shadow{65.0f / 255.0f, 32.0f / 255.0f, 0.0f, 0.95f * alpha};
++    ColorRgba white_tint{1.0f, 1.0f, 1.0f, alpha};
++
++    int outline_px = std::max(1, static_cast<int>(std::round(1.0f * s)));
++    add_snp_text(toast_verts,
++                 tx + 16.0f * s, row2_y,
++                 sub_scale, sub_scale,
++                 sub_upper, 0.0f,
++                 false, outline_px, &bronze_shadow,
++                 true, white_tint,
++                 avail - 16.0f * s);
++}
++
++void build_toast_detail_row(std::vector<OverlayVertex>& toast_verts,
++                            const RaToastItem& toast,
++                            float tx, float y0, float x1, float s, float alpha) {
++    if (toast.detail.empty()) return;
++    float avail = (x1 - TOAST_CARD_PAD_RIGHT * s) - tx;
++    std::string detail_upper = to_upper_ascii(toast.detail);
++    ColorRgba detail_outline{38.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.96f * alpha};
++    ColorRgba champagne_tint{1.0f, 0.96f, 0.88f, 0.96f * alpha};
++    int outline_px = std::max(1, static_cast<int>(std::round(1.0f * s)));
++
++    add_snp_text(toast_verts,
++                 tx, y0 + 53.0f * s,
++                 1.0f * s, 1.0f * s,
++                 detail_upper, 1.0f * s,
++                 true, outline_px, &detail_outline,
++                 true, champagne_tint,
++                 avail);
++}
++
 +void render_toast_card(int win_w, int win_h) {
 +    RaToastItem toast;
 +    if (!ra_get_current_toast(toast)) {
 +        return;
 +    }
 +
-+    float elapsed = toast.elapsed_sec;
-+    float duration = toast.duration_sec;
-+
 +    float alpha = 1.0f;
 +    float x_slide = 0.0f;
-+    constexpr float SLIDE_IN_DURATION = 0.35f;
-+    constexpr float FADE_OUT_DURATION = 0.5f;
++    calculate_toast_animation(toast.elapsed_sec, toast.duration_sec, alpha, x_slide);
 +
-+    if (elapsed < SLIDE_IN_DURATION) {
-+        float t = elapsed / SLIDE_IN_DURATION;
-+        alpha = t;
-+        x_slide = (1.0f - t) * -320.0f;
-+    } else if (elapsed > duration - FADE_OUT_DURATION) {
-+        float t = std::clamp((duration - elapsed) / FADE_OUT_DURATION, 0.0f, 1.0f);
-+        alpha = t;
-+        x_slide = (1.0f - t) * -40.0f;
-+    }
-+
-+    float scale = std::clamp(static_cast<float>(win_h) / 480.0f, 0.75f, 1.5f);
-+    float card_w = std::min(static_cast<float>(win_w) - 32.0f, 500.0f * scale);
-+    float card_h = 64.0f * scale;
-+    float card_x0 = 16.0f * scale + x_slide;
-+    float card_y0 = static_cast<float>(win_h) - card_h - 16.0f * scale;
-+    float card_x1 = card_x0 + card_w;
-+    float card_y1 = card_y0 + card_h;
++    float s = std::max(1.0f, std::floor(static_cast<float>(win_h) / TOAST_BASE_HEIGHT));
++    float card_w = std::min(static_cast<float>(win_w) - 32.0f, TOAST_CARD_WIDTH * s);
++    float card_h = TOAST_CARD_HEIGHT * s;
++    float x0 = TOAST_MARGIN * s + x_slide;
++    float y0 = static_cast<float>(win_h) - card_h - TOAST_MARGIN * s;
++    float x1 = x0 + card_w;
 +
 +    std::vector<OverlayVertex> toast_vertices;
 +    std::vector<OverlayVertex> badge_vertices;
 +
-+    ColorRgba bg_color{0.06f, 0.08f, 0.12f, 0.94f * alpha};
-+    ColorRgba border_color{0.95f, 0.78f, 0.20f, 0.95f * alpha};
-+    ColorRgba bar_color{1.0f, 0.85f, 0.25f, 1.0f * alpha};
-+    if (toast.accent_kind == 3) {
-+        border_color = ColorRgba{0.85f, 0.30f, 0.25f, 0.95f * alpha};
-+        bar_color = ColorRgba{1.0f, 0.35f, 0.30f, 1.0f * alpha};
-+    } else if (toast.accent_kind == 1) {
-+        border_color = ColorRgba{0.35f, 0.70f, 1.0f, 0.95f * alpha};
-+        bar_color = ColorRgba{0.45f, 0.85f, 1.0f, 1.0f * alpha};
-+    }
++    ColorRgba smoked_black{0.0f, 0.0f, 0.0f, 0.72f * alpha};
++    add_solid_rect_to(toast_vertices, x0, y0, x1, y0 + card_h, smoked_black);
 +
-+    auto add_quad_to = [](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1,
-+                          float u0, float v0, float u1, float v1, const ColorRgba& c) {
-+        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
-+        list.push_back({x1, y0, u1, v0, c.r, c.g, c.b, c.a});
-+        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
-+        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
-+        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
-+        list.push_back({x0, y1, u0, v1, c.r, c.g, c.b, c.a});
-+    };
++    float bx1 = 0.0f;
++    build_toast_badge_well(toast_vertices, badge_vertices, toast, x0, y0, card_h, s, alpha, bx1);
 +
-+    auto add_rect_to = [&](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1, const ColorRgba& c) {
-+        add_quad_to(list, x0, y0, x1, y1, SOLID_UV_U, SOLID_UV_V, SOLID_UV_U, SOLID_UV_V, c);
-+    };
++    float tx = bx1 + TOAST_BADGE_PAD_RIGHT * s;
 +
-+    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y1, bg_color);
-+    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y0 + 1.5f, border_color);
-+    add_rect_to(toast_vertices, card_x0, card_y1 - 1.5f, card_x1, card_y1, border_color);
-+    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 1.5f, card_y1, border_color);
-+    add_rect_to(toast_vertices, card_x1 - 1.5f, card_y0, card_x1, card_y1, border_color);
-+    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 4.0f * scale, card_y1, bar_color);
++    build_toast_header_banner(toast_vertices, toast, tx, y0, x1, s, alpha);
 +
-+    float badge_size = 46.0f * scale;
-+    float badge_x0 = card_x0 + 10.0f * scale;
-+    float badge_y0 = card_y0 + (card_h - badge_size) * 0.5f;
-+    float badge_x1 = badge_x0 + badge_size;
-+    float badge_y1 = badge_y0 + badge_size;
++    float row2_y = y0 + 30.0f * s;
++    build_toast_subtitle_row(toast_vertices, toast, tx, row2_y, x1, s, alpha);
 +
-+    bool has_badge = !toast.rgba_pixels.empty();
-+    if (has_badge) {
-+        ColorRgba badge_col{1.0f, 1.0f, 1.0f, alpha};
-+        add_quad_to(badge_vertices, badge_x0, badge_y0, badge_x1, badge_y1, 0.0f, 0.0f, 1.0f, 1.0f, badge_col);
-+    }
-+
-+    float text_x = badge_x1 + 10.0f * scale;
-+    float crisp_scale = std::max(1.0f, std::floor(scale));
-+
-+    auto add_string_to = [&](std::vector<OverlayVertex>& list, float x, float y, float s, const std::string& str, const ColorRgba& c) {
-+        float avail_w = (card_x1 - 8.0f * scale) - x;
-+        size_t max_chars = avail_w > 0.0f ? static_cast<size_t>(avail_w / (FONT_CHAR_WIDTH * s)) : 0;
-+        std::string clipped = str;
-+        if (clipped.size() > max_chars) {
-+            clipped = (max_chars > 3) ? (clipped.substr(0, max_chars - 3) + "...") : clipped.substr(0, max_chars);
-+        }
-+        float cx = x;
-+        for (char ch : clipped) {
-+            if (ch < 32 || ch > 126) ch = '?';
-+            int glyph = ch - 32;
-+            int col = glyph % 16;
-+            int row = glyph / 16;
-+            float u0 = (col * 8) / 128.0f;
-+            float v0 = (row * 8) / 64.0f;
-+            float u1 = (col * 8 + 8) / 128.0f;
-+            float v1 = (row * 8 + 8) / 64.0f;
-+            add_quad_to(list, cx, y, cx + FONT_CHAR_WIDTH * s, y + FONT_CHAR_HEIGHT * s, u0, v0, u1, v1, c);
-+            cx += FONT_CHAR_WIDTH * s;
-+        }
-+    };
-+
-+    ColorRgba title_color = (toast.accent_kind == 0) ? ColorRgba{1.0f, 0.84f, 0.20f, alpha} : ColorRgba{0.45f, 0.85f, 1.0f, alpha};
-+    ColorRgba sub_color{1.0f, 1.0f, 1.0f, alpha};
-+    ColorRgba detail_color{0.75f, 0.80f, 0.88f, 0.90f * alpha};
-+
-+    add_string_to(toast_vertices, text_x, card_y0 + 10.0f * scale, crisp_scale, toast.title, title_color);
-+    add_string_to(toast_vertices, text_x, card_y0 + 26.0f * scale, crisp_scale * 1.25f, toast.subtitle, sub_color);
-+    if (!toast.detail.empty()) {
-+        add_string_to(toast_vertices, text_x, card_y0 + 45.0f * scale, crisp_scale, toast.detail, detail_color);
-+    }
++    build_toast_detail_row(toast_vertices, toast, tx, y0, x1, s, alpha);
 +
 +    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
 +    gl::glViewport(0, 0, win_w, win_h);
@@ -8210,14 +8642,15 @@ index 0000000..92f45de
 +    gl::glActiveTexture(GL_TEXTURE0);
 +
 +    if (!toast_vertices.empty()) {
-+        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
++        gl::glBindBuffer(GL_ARRAY_BUFFER, s_toast_vbo);
 +        gl::glBufferData(GL_ARRAY_BUFFER, toast_vertices.size() * sizeof(OverlayVertex), toast_vertices.data(), GL_STREAM_DRAW);
-+        gl::glBindTexture(GL_TEXTURE_2D, s_font_texture);
-+        gl::glBindVertexArray(s_vao);
++        gl::glBindTexture(GL_TEXTURE_2D, s_snp_font_texture);
++        gl::glBindVertexArray(s_toast_vao);
 +        gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(toast_vertices.size()));
 +    }
 +
-+    if (has_badge && !badge_vertices.empty()) {
++    if (!toast.rgba_pixels.empty() && !badge_vertices.empty()) {
++        bool created_badge_tex = false;
 +        if (s_toast_badge_texture == 0) {
 +            gl::glGenTextures(1, &s_toast_badge_texture);
 +            gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
@@ -8225,18 +8658,19 @@ index 0000000..92f45de
 +            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 +            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 +            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++            created_badge_tex = true;
 +        } else {
 +            gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
 +        }
 +
-+        if (s_last_badge_pixels != toast.rgba_pixels) {
++        if (created_badge_tex || s_last_badge_pixels != toast.rgba_pixels) {
 +            gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, toast.rgba_pixels.data());
 +            s_last_badge_pixels = toast.rgba_pixels;
 +        }
 +
-+        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
++        gl::glBindBuffer(GL_ARRAY_BUFFER, s_toast_vbo);
 +        gl::glBufferData(GL_ARRAY_BUFFER, badge_vertices.size() * sizeof(OverlayVertex), badge_vertices.data(), GL_STREAM_DRAW);
-+        gl::glBindVertexArray(s_vao);
++        gl::glBindVertexArray(s_toast_vao);
 +        gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(badge_vertices.size()));
 +    }
 +
@@ -8592,10 +9026,10 @@ index 0000000..1ee92d5
 +} // namespace snp::handheld
 diff --git a/src/handheld/ra_client.cpp b/src/handheld/ra_client.cpp
 new file mode 100644
-index 0000000..a8e2f7c
+index 0000000..f7b50c7
 --- /dev/null
 +++ b/src/handheld/ra_client.cpp
-@@ -0,0 +1,1154 @@
+@@ -0,0 +1,1233 @@
 +#include "ra_client.h"
 +
 +#include <algorithm>
@@ -9169,7 +9603,8 @@ index 0000000..a8e2f7c
 +
 +void push_toast(const std::string& title, const std::string& subtitle, const std::string& detail,
 +                std::vector<uint8_t> rgba_pixels, float duration, int accent) {
-+    if (!get_config().retroachievements.notifications) {
++    bool demo_env = (std::getenv("SNP_RA_DEMO_TOAST") != nullptr || std::getenv("SNP_RA_DEMO_TOAST_AT_FRAME") != nullptr);
++    if (!get_config().retroachievements.notifications && !demo_env) {
 +        return;
 +    }
 +    RaToastItem item;
@@ -9308,17 +9743,23 @@ index 0000000..a8e2f7c
 +            }
 +        }
 +
-+        std::string sub_header = s_is_offline_mode.load()
-+            ? "RetroAchievements - Offline (Cached)"
-+            : "RetroAchievements - Softcore";
++        std::string header = s_is_offline_mode.load()
++            ? "RA - OFFLINE MODE"
++            : "RETROACHIEVEMENTS";
++        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
++        std::string sub_line = (s_is_offline_mode.load() ? "Offline: " : "Logged in: ") + user_label;
++        std::string mode_suffix = s_is_offline_mode.load() ? " - Cached" : " - Softcore";
 +        std::string detail = std::to_string(s_unlocked_achievements) + "/" +
 +                             std::to_string(s_total_achievements) + " Unlocked (" +
 +                             std::to_string(summary.points_unlocked) + "/" +
-+                             std::to_string(summary.points_available) + " pts)";
-+        push_toast(sub_header, s_game_title, detail,
-+                   get_cached_badge_or_trophy(badge_name), DEFAULT_TOAST_DURATION, 1);
++                             std::to_string(summary.points_available) + " pts)" + mode_suffix;
++        push_toast(header, sub_line, detail,
++                   get_cached_badge_or_trophy(badge_name), 5.0f, 1);
 +    } else {
 +        s_state.store(RaClientState::LoggedIn);
++        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
++        push_toast("RETROACHIEVEMENTS", "Logged in: " + user_label,
++                   "Softcore mode active", {}, 5.0f, 1);
 +        std::fprintf(stderr, "[RA] Game identification failed: %s\n", error_message ? error_message : "Unknown");
 +    }
 +}
@@ -9332,6 +9773,9 @@ index 0000000..a8e2f7c
 +                                               on_game_load_completed, nullptr);
 +    } else {
 +        s_state.store(RaClientState::LoggedIn);
++        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
++        push_toast("RETROACHIEVEMENTS", "Logged in: " + user_label,
++                   "Softcore mode active", {}, 5.0f, 1);
 +    }
 +}
 +
@@ -9522,7 +9966,7 @@ index 0000000..a8e2f7c
 +
 +    if (std::getenv("SNP_RA_DEMO_TOAST") != nullptr) {
 +        push_toast("ACHIEVEMENT UNLOCKED", "Target Confirmed",
-+                   "Defeat the Stage 1 boss without taking damage (10 pts)",
++                   "Clear Stage 1-1 without continuing (10 pts)",
 +                   ra_generate_trophy_badge(), 5.0f, 0);
 +    }
 +}
@@ -9576,13 +10020,39 @@ index 0000000..a8e2f7c
 +
 +    s_current_rdram = nullptr;
 +
++    static uint64_t s_frame_counter = 0;
++    static bool s_demo_frame_fired = false;
++    ++s_frame_counter;
++    if (!s_demo_frame_fired) {
++        const char* frame_env = std::getenv("SNP_RA_DEMO_TOAST_AT_FRAME");
++        if (frame_env != nullptr) {
++            uint64_t target_frame = static_cast<uint64_t>(std::strtoull(frame_env, nullptr, 10));
++            if (s_frame_counter >= target_frame) {
++                s_demo_frame_fired = true;
++                push_toast("ACHIEVEMENT UNLOCKED", "Target Confirmed",
++                           "Clear Stage 1-1 without continuing (10 pts)",
++                           ra_generate_trophy_badge(), 5.0f, 0);
++            }
++        }
++    }
++
 +    auto now = std::chrono::steady_clock::now();
 +    float dt = std::chrono::duration<float>(now - s_last_frame_time).count();
 +    s_last_frame_time = now;
++    if (dt < 0.0f || dt > 1.0f) {
++        dt = 1.0f / 60.0f;
++    }
++
++    constexpr uint64_t STARTUP_TOAST_HOLD_FRAMES = 60;
++    constexpr float TOAST_SLIDE_IN_HOLD_SEC = 0.35f;
 +
 +    std::lock_guard<std::mutex> lock(s_toast_mutex);
 +    if (!s_toast_queue.empty()) {
 +        s_toast_queue.front().elapsed_sec += dt;
++        if (rdram != nullptr && s_frame_counter < STARTUP_TOAST_HOLD_FRAMES &&
++            s_toast_queue.front().elapsed_sec > TOAST_SLIDE_IN_HOLD_SEC) {
++            s_toast_queue.front().elapsed_sec = TOAST_SLIDE_IN_HOLD_SEC;
++        }
 +        if (s_toast_queue.front().elapsed_sec >= s_toast_queue.front().duration_sec) {
 +            s_toast_queue.pop_front();
 +        }
@@ -9704,38 +10174,81 @@ index 0000000..a8e2f7c
 +
 +std::vector<uint8_t> ra_generate_trophy_badge(uint32_t width, uint32_t height) {
 +    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4, 0);
++    const float cx = static_cast<float>(width) * 0.5f - 0.5f;
++    const float cy = static_cast<float>(height) * 0.5f - 0.5f;
 +
 +    for (uint32_t y = 0; y < height; ++y) {
 +        for (uint32_t x = 0; x < width; ++x) {
++            float dx = static_cast<float>(x) - cx;
++            float dy = static_cast<float>(y) - cy;
++            float dist = std::hypot(dx, dy);
++
 +            uint8_t r = 0, g = 0, b = 0, a = 0;
 +
-+            if (y >= 14 && y <= 34) {
-+                int inset = (y > 22) ? (y - 22) / 2 : 0;
-+                if (x >= 20 + inset && x <= 43 - inset) {
-+                    r = 245; g = 197; b = 24; a = 255;
-+                    if (y <= 16 || x == 20 + inset || x == 43 - inset) {
-+                        r = 255; g = 224; b = 102;
++            if (dist <= 28.5f) {
++                float t = dist / 28.5f;
++                r = static_cast<uint8_t>(std::clamp(28.0f - 12.0f * t, 0.0f, 255.0f));
++                g = static_cast<uint8_t>(std::clamp(20.0f - 8.0f * t, 0.0f, 255.0f));
++                b = static_cast<uint8_t>(std::clamp(26.0f - 10.0f * t, 0.0f, 255.0f));
++                a = 245;
++            }
++
++            if (dist >= 24.5f && dist <= 28.5f) {
++                if (dy < 0.0f) {
++                    r = 255; g = 215; b = 95; a = 255;
++                } else {
++                    r = 185; g = 110; b = 22; a = 255;
++                }
++            } else if (dist >= 22.8f && dist < 24.5f) {
++                r = 12; g = 10; b = 14; a = 255;
++            }
++
++            if ((std::abs(dx) <= 1.6f && std::abs(dy) >= 17.0f && std::abs(dy) <= 29.5f) ||
++                (std::abs(dy) <= 1.6f && std::abs(dx) >= 17.0f && std::abs(dx) <= 29.5f)) {
++                r = 255; g = 88; b = 104; a = 255;
++            }
++
++            if (y >= 15 && y <= 33) {
++                int inset = std::max(0, (static_cast<int>(y) - 21) * 5 / 12);
++                int ix = static_cast<int>(x);
++                if (ix >= 21 + inset && ix <= 42 - inset) {
++                    float vgrad = (static_cast<float>(y) - 15.0f) / 18.0f;
++                    float hshine = 1.0f - std::min(1.0f, std::abs(static_cast<float>(x) - 29.0f) / 10.0f);
++                    r = static_cast<uint8_t>(std::clamp(255.0f - 20.0f * vgrad + 25.0f * hshine, 0.0f, 255.0f));
++                    g = static_cast<uint8_t>(std::clamp(235.0f - 75.0f * vgrad + 30.0f * hshine, 0.0f, 255.0f));
++                    b = static_cast<uint8_t>(std::clamp(130.0f - 105.0f * vgrad + 45.0f * hshine, 0.0f, 255.0f));
++                    a = 255;
++                    if (ix == 21 + inset || ix == 42 - inset || y == 15) {
++                        r = 255; g = 248; b = 190;
 +                    }
 +                }
 +            }
 +
-+            if (y >= 18 && y <= 28) {
-+                if ((x >= 14 && x <= 19) || (x >= 44 && x <= 49)) {
-+                    if (y == 18 || y == 28 || x == 14 || x == 49) {
-+                        r = 212; g = 158; b = 14; a = 255;
-+                    }
++            if (y >= 18 && y <= 27) {
++                if ((x >= 16 && x <= 20 && (y == 18 || y == 27 || x == 16)) ||
++                    (x >= 43 && x <= 47 && (y == 18 || y == 27 || x == 47))) {
++                    r = 230; g = 165; b = 35; a = 255;
 +                }
 +            }
 +
-+            if (y >= 35 && y <= 45 && x >= 30 && x <= 33) {
-+                r = 220; g = 170; b = 18; a = 255;
++            if (y >= 34 && y <= 41 && x >= 29 && x <= 34) {
++                if (x <= 31) {
++                    r = 255; g = 215; b = 95; a = 255;
++                } else {
++                    r = 195; g = 125; b = 24; a = 255;
++                }
 +            }
 +
-+            if (y >= 46 && y <= 52 && x >= 22 && x <= 41) {
-+                r = 245; g = 197; b = 24; a = 255;
-+                if (y == 46 || x == 22 || x == 41) {
-+                    r = 255; g = 224; b = 102;
++            if (y >= 42 && y <= 46 && x >= 23 && x <= 40) {
++                if (y <= 43) {
++                    r = 255; g = 232; b = 140; a = 255;
++                } else {
++                    r = 220; g = 150; b = 28; a = 255;
 +                }
++            }
++
++            if (y >= 47 && y <= 49 && x >= 20 && x <= 43) {
++                r = 140; g = 84; b = 16; a = 255;
 +            }
 +
 +            size_t idx = (static_cast<size_t>(y) * width + x) * 4;
@@ -10740,10 +11253,10 @@ index 0000000..fe78b40
 +} // namespace snp::handheld
 diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
 new file mode 100644
-index 0000000..167bb75
+index 0000000..ff714a9
 --- /dev/null
 +++ b/tests/CMakeLists.txt
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,106 @@
 +cmake_minimum_required(VERSION 3.20)
 +project(test_gles3_renderer LANGUAGES C CXX)
 +
@@ -10806,6 +11319,8 @@ index 0000000..167bb75
 +
 +add_executable(test_ra_client
 +    test_ra_client.cpp
++    ../src/gles3/gl_loader.cpp
++    ../src/handheld/handheld_overlay.cpp
 +    ../src/handheld/ra_credentials.cpp
 +    ../src/handheld/ra_offline_cache.cpp
 +    ../src/handheld/png_decode.cpp
@@ -11590,10 +12105,10 @@ index 0000000..2bd6ef8
 +}
 diff --git a/tests/test_ra_client.cpp b/tests/test_ra_client.cpp
 new file mode 100644
-index 0000000..d176e7d
+index 0000000..47c6dee
 --- /dev/null
 +++ b/tests/test_ra_client.cpp
-@@ -0,0 +1,639 @@
+@@ -0,0 +1,705 @@
 +#include <algorithm>
 +#include <cassert>
 +#include <cstdint>
@@ -11605,7 +12120,10 @@ index 0000000..d176e7d
 +#include <sstream>
 +#include <vector>
 +
++#include <SDL2/SDL.h>
++#include "gl_loader.h"
 +#include "handheld_config.h"
++#include "handheld_overlay.h"
 +#include "png_decode.h"
 +#include "ra_client.h"
 +#include "ra_credentials.h"
@@ -12210,6 +12728,68 @@ index 0000000..d176e7d
 +    std::printf("[PASS] snprecomp.toml round-trip and partial key safety verified.\n");
 +}
 +
++void test_overlay_menu_persists_with_active_toast() {
++    std::printf("[TEST] Running Quick Settings menu + active toast VBO isolation test...\n");
++
++    setenv("SDL_VIDEODRIVER", "offscreen", 1);
++    assert(SDL_Init(SDL_INIT_VIDEO) == 0);
++
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
++
++    constexpr int WIN_W = 720;
++    constexpr int WIN_H = 480;
++    SDL_Window* win = SDL_CreateWindow("Overlay Toast VBO Test", 0, 0, WIN_W, WIN_H,
++                                       SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
++    assert(win != nullptr);
++
++    SDL_GLContext ctx = SDL_GL_CreateContext(win);
++    assert(ctx != nullptr);
++    assert(SDL_GL_MakeCurrent(win, ctx) == 0);
++    assert(snp::gles3::init_gl_loader());
++
++    auto& cfg = snp::handheld::get_mutable_config();
++    cfg.retroachievements.notifications = true;
++    setenv("SNP_RA_DEMO_TOAST_AT_FRAME", "1", 1);
++
++    snp::handheld::ra_do_frame(nullptr);
++    assert(snp::handheld::ra_has_active_toasts());
++    snp::handheld::open_overlay();
++    assert(snp::handheld::is_overlay_open());
++
++    // Frame 1: builds menu mesh (s_mesh_dirty = true -> false) AND renders toast card + 6-vertex badge
++    snp::gles3::gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    snp::gles3::gl::glViewport(0, 0, WIN_W, WIN_H);
++    snp::gles3::gl::glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
++    snp::gles3::gl::glClear(GL_COLOR_BUFFER_BIT);
++    snp::handheld::render_overlay(WIN_W, WIN_H);
++    assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
++
++    // Frame 2: s_mesh_dirty is false; menu VBO must NOT have been overwritten by toast badge vertices
++    snp::gles3::gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    snp::gles3::gl::glViewport(0, 0, WIN_W, WIN_H);
++    snp::gles3::gl::glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
++    snp::gles3::gl::glClear(GL_COLOR_BUFFER_BIT);
++    snp::handheld::render_overlay(WIN_W, WIN_H);
++    assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
++
++    uint8_t panel_px[4]{};
++    // OpenGL origin is bottom-left; (55, 440) -> screen (55, 40), empty dark top-left interior of Quick Settings panel
++    snp::gles3::gl::glReadPixels(55, 440, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, panel_px);
++    assert(panel_px[1] < 50 && panel_px[2] > 15); // Dark navy panel bg over green clear, NOT (0, 255, 0)
++
++    snp::handheld::close_overlay();
++    snp::handheld::shutdown_overlay();
++    unsetenv("SNP_RA_DEMO_TOAST_AT_FRAME");
++
++    SDL_GL_DeleteContext(ctx);
++    SDL_DestroyWindow(win);
++    SDL_Quit();
++
++    std::printf("[PASS] Quick Settings menu + active toast VBO isolation verified.\n");
++}
++
 +} // namespace
 +
 +int main() {
@@ -12227,9 +12807,10 @@ index 0000000..d176e7d
 +    test_startsession_merge_with_offline_unlocks();
 +    test_pending_unlock_queue_and_sync();
 +    test_config_roundtrip_and_partial_toml();
++    test_overlay_menu_persists_with_active_toast();
 +
 +    std::printf("========================================\n");
-+    std::printf("All 10 test suites passed successfully!\n");
++    std::printf("All 11 test suites passed successfully!\n");
 +    std::printf("========================================\n");
 +    return 0;
 +}
