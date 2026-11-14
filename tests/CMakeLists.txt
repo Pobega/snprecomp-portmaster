@@ -42,3 +42,63 @@ target_include_directories(test_snp_patch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools
 )
 
+file(GLOB RCHEEVOS_TEST_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/api/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/client/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/hash/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/runtime/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/util/*.c
+)
+
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/miniz_export.h
+    "#pragma once\n#define MINIZ_EXPORT\n#define MINIZ_NO_EXPORT\n"
+)
+
+file(GLOB MINIZ_TEST_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/miniz/*.c
+)
+
+add_executable(test_ra_client
+    test_ra_client.cpp
+    ../src/handheld/ra_credentials.cpp
+    ../src/handheld/ra_offline_cache.cpp
+    ../src/handheld/png_decode.cpp
+    ../src/handheld/ra_client.cpp
+    ../src/handheld/handheld_config.cpp
+    ../src/handheld/rom_loader.cpp
+    ${MINIZ_TEST_SOURCES}
+    ${RCHEEVOS_TEST_SOURCES}
+)
+
+target_include_directories(test_ra_client PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/handheld
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/gles3
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/miniz
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/concurrentqueue
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/sse2neon
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/N64Recomp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/N64Recomp/lib/tomlplusplus/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/librecomp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include/ultramodern
+    ${SDL2_INCLUDE_DIRS}
+)
+
+target_compile_definitions(test_ra_client PRIVATE
+    MINIZ_STATIC_DEFINE
+    RC_CLIENT_SUPPORTS_HASH
+    SNP_BACKEND_GLES3
+)
+
+target_link_libraries(test_ra_client PRIVATE
+    ${SDL2_LIBRARIES}
+    dl
+    pthread
+)
+
+
