@@ -11,8 +11,10 @@ Unofficial, and not affiliated with the rights holders. **No game data is includ
 | Title Screen (`3:2` Handheld) | Opening Cutscene (`16:9` Widescreen) |
 | :---: | :---: |
 | ![Title Screen (3:2)](docs/screenshots/title_3x2.png) | ![Opening Cutscene (16:9)](docs/screenshots/cutscene_16x9.png) |
-| **Stage Combat (`16:9` Widescreen)** | **In-Game Quick Settings (`3:2` Handheld)** |
-| ![Stage Combat (16:9)](docs/screenshots/gameplay_16x9.png) | ![Quick Settings (3:2)](docs/screenshots/quick_settings_3x2.png) |
+| **Stage Combat (`16:9` Widescreen)** | **RetroAchievements (`3:2` Handheld)** |
+| ![Stage Combat (16:9)](docs/screenshots/gameplay_16x9.png) | ![RetroAchievements (3:2)](docs/screenshots/retroachievements_3x2.png) |
+| **In-Game Quick Settings (`3:2` Handheld)** | |
+| ![Quick Settings (3:2)](docs/screenshots/quick_settings_3x2.png) | |
 
 ### Aspect Ratio Comparison (`Vert+` Square & `Hor+` Widescreen vs Original)
 

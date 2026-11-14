@@ -571,7 +571,8 @@ void http_worker_thread_func() {
 
 void push_toast(const std::string& title, const std::string& subtitle, const std::string& detail,
                 std::vector<uint8_t> rgba_pixels, float duration, int accent) {
-    if (!get_config().retroachievements.notifications) {
+    bool demo_env = (std::getenv("SNP_RA_DEMO_TOAST") != nullptr || std::getenv("SNP_RA_DEMO_TOAST_AT_FRAME") != nullptr);
+    if (!get_config().retroachievements.notifications && !demo_env) {
         return;
     }
     RaToastItem item;
@@ -924,7 +925,7 @@ void ra_init() {
 
     if (std::getenv("SNP_RA_DEMO_TOAST") != nullptr) {
         push_toast("ACHIEVEMENT UNLOCKED", "Target Confirmed",
-                   "Defeat the Stage 1 boss without taking damage (10 pts)",
+                   "Clear Stage 1-1 without continuing (10 pts)",
                    ra_generate_trophy_badge(), 5.0f, 0);
     }
 }
@@ -978,9 +979,28 @@ void ra_do_frame(uint8_t* rdram) {
 
     s_current_rdram = nullptr;
 
+    static uint64_t s_frame_counter = 0;
+    static bool s_demo_frame_fired = false;
+    ++s_frame_counter;
+    if (!s_demo_frame_fired) {
+        const char* frame_env = std::getenv("SNP_RA_DEMO_TOAST_AT_FRAME");
+        if (frame_env != nullptr) {
+            uint64_t target_frame = static_cast<uint64_t>(std::strtoull(frame_env, nullptr, 10));
+            if (s_frame_counter >= target_frame) {
+                s_demo_frame_fired = true;
+                push_toast("ACHIEVEMENT UNLOCKED", "Target Confirmed",
+                           "Clear Stage 1-1 without continuing (10 pts)",
+                           ra_generate_trophy_badge(), 5.0f, 0);
+            }
+        }
+    }
+
     auto now = std::chrono::steady_clock::now();
     float dt = std::chrono::duration<float>(now - s_last_frame_time).count();
     s_last_frame_time = now;
+    if (dt < 0.0f || dt > 1.0f) {
+        dt = 1.0f / 60.0f;
+    }
 
     std::lock_guard<std::mutex> lock(s_toast_mutex);
     if (!s_toast_queue.empty()) {
@@ -1106,38 +1126,81 @@ bool ra_get_current_toast(RaToastItem& out_toast) {
 
 std::vector<uint8_t> ra_generate_trophy_badge(uint32_t width, uint32_t height) {
     std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4, 0);
+    const float cx = static_cast<float>(width) * 0.5f - 0.5f;
+    const float cy = static_cast<float>(height) * 0.5f - 0.5f;
 
     for (uint32_t y = 0; y < height; ++y) {
         for (uint32_t x = 0; x < width; ++x) {
+            float dx = static_cast<float>(x) - cx;
+            float dy = static_cast<float>(y) - cy;
+            float dist = std::hypot(dx, dy);
+
             uint8_t r = 0, g = 0, b = 0, a = 0;
 
-            if (y >= 14 && y <= 34) {
-                int inset = (y > 22) ? (y - 22) / 2 : 0;
-                if (x >= 20 + inset && x <= 43 - inset) {
-                    r = 245; g = 197; b = 24; a = 255;
-                    if (y <= 16 || x == 20 + inset || x == 43 - inset) {
-                        r = 255; g = 224; b = 102;
+            if (dist <= 28.5f) {
+                float t = dist / 28.5f;
+                r = static_cast<uint8_t>(std::clamp(28.0f - 12.0f * t, 0.0f, 255.0f));
+                g = static_cast<uint8_t>(std::clamp(20.0f - 8.0f * t, 0.0f, 255.0f));
+                b = static_cast<uint8_t>(std::clamp(26.0f - 10.0f * t, 0.0f, 255.0f));
+                a = 245;
+            }
+
+            if (dist >= 24.5f && dist <= 28.5f) {
+                if (dy < 0.0f) {
+                    r = 255; g = 215; b = 95; a = 255;
+                } else {
+                    r = 185; g = 110; b = 22; a = 255;
+                }
+            } else if (dist >= 22.8f && dist < 24.5f) {
+                r = 12; g = 10; b = 14; a = 255;
+            }
+
+            if ((std::abs(dx) <= 1.6f && std::abs(dy) >= 17.0f && std::abs(dy) <= 29.5f) ||
+                (std::abs(dy) <= 1.6f && std::abs(dx) >= 17.0f && std::abs(dx) <= 29.5f)) {
+                r = 255; g = 88; b = 104; a = 255;
+            }
+
+            if (y >= 15 && y <= 33) {
+                int inset = std::max(0, (static_cast<int>(y) - 21) * 5 / 12);
+                int ix = static_cast<int>(x);
+                if (ix >= 21 + inset && ix <= 42 - inset) {
+                    float vgrad = (static_cast<float>(y) - 15.0f) / 18.0f;
+                    float hshine = 1.0f - std::min(1.0f, std::abs(static_cast<float>(x) - 29.0f) / 10.0f);
+                    r = static_cast<uint8_t>(std::clamp(255.0f - 20.0f * vgrad + 25.0f * hshine, 0.0f, 255.0f));
+                    g = static_cast<uint8_t>(std::clamp(235.0f - 75.0f * vgrad + 30.0f * hshine, 0.0f, 255.0f));
+                    b = static_cast<uint8_t>(std::clamp(130.0f - 105.0f * vgrad + 45.0f * hshine, 0.0f, 255.0f));
+                    a = 255;
+                    if (ix == 21 + inset || ix == 42 - inset || y == 15) {
+                        r = 255; g = 248; b = 190;
                     }
                 }
             }
 
-            if (y >= 18 && y <= 28) {
-                if ((x >= 14 && x <= 19) || (x >= 44 && x <= 49)) {
-                    if (y == 18 || y == 28 || x == 14 || x == 49) {
-                        r = 212; g = 158; b = 14; a = 255;
-                    }
+            if (y >= 18 && y <= 27) {
+                if ((x >= 16 && x <= 20 && (y == 18 || y == 27 || x == 16)) ||
+                    (x >= 43 && x <= 47 && (y == 18 || y == 27 || x == 47))) {
+                    r = 230; g = 165; b = 35; a = 255;
                 }
             }
 
-            if (y >= 35 && y <= 45 && x >= 30 && x <= 33) {
-                r = 220; g = 170; b = 18; a = 255;
+            if (y >= 34 && y <= 41 && x >= 29 && x <= 34) {
+                if (x <= 31) {
+                    r = 255; g = 215; b = 95; a = 255;
+                } else {
+                    r = 195; g = 125; b = 24; a = 255;
+                }
             }
 
-            if (y >= 46 && y <= 52 && x >= 22 && x <= 41) {
-                r = 245; g = 197; b = 24; a = 255;
-                if (y == 46 || x == 22 || x == 41) {
-                    r = 255; g = 224; b = 102;
+            if (y >= 42 && y <= 46 && x >= 23 && x <= 40) {
+                if (y <= 43) {
+                    r = 255; g = 232; b = 140; a = 255;
+                } else {
+                    r = 220; g = 150; b = 28; a = 255;
                 }
+            }
+
+            if (y >= 47 && y <= 49 && x >= 20 && x <= 43) {
+                r = 140; g = 84; b = 16; a = 255;
             }
 
             size_t idx = (static_cast<size_t>(y) * width + x) * 4;

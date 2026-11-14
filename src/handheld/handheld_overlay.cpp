@@ -31,6 +31,28 @@ constexpr float FONT_CHAR_HEIGHT = 8.0f;
 constexpr float SOLID_UV_U = 127.5f / 128.0f;
 constexpr float SOLID_UV_V = 63.5f / 64.0f;
 
+constexpr float SNP_FONT_CHAR_WIDTH = 8.0f;
+constexpr float SNP_FONT_CHAR_HEIGHT = 8.0f;
+constexpr float SNP_FONT_TEX_SIZE = 128.0f;
+constexpr float SNP_FONT_GOLD_ROW_OFFSET = 64.0f;
+constexpr float SNP_SOLID_PIXEL_X = 127.0f;
+constexpr float SNP_SOLID_PIXEL_Y = 63.0f;
+constexpr float SNP_SOLID_UV_U = (SNP_SOLID_PIXEL_X + 0.5f) / SNP_FONT_TEX_SIZE;
+constexpr float SNP_SOLID_UV_V = (SNP_SOLID_PIXEL_Y + 0.5f) / SNP_FONT_TEX_SIZE;
+
+constexpr float TOAST_SLIDE_IN_DURATION = 0.35f;
+constexpr float TOAST_FADE_OUT_DURATION = 0.50f;
+constexpr float TOAST_SLIDE_IN_OFFSET = -320.0f;
+constexpr float TOAST_FADE_OUT_OFFSET = -40.0f;
+constexpr float TOAST_BASE_HEIGHT = 480.0f;
+constexpr float TOAST_CARD_WIDTH = 476.0f;
+constexpr float TOAST_CARD_HEIGHT = 74.0f;
+constexpr float TOAST_MARGIN = 14.0f;
+constexpr float TOAST_BADGE_SIZE = 48.0f;
+constexpr float TOAST_BADGE_PAD_LEFT = 11.0f;
+constexpr float TOAST_BADGE_PAD_RIGHT = 13.0f;
+constexpr float TOAST_CARD_PAD_RIGHT = 12.0f;
+
 enum class MenuRow {
     ControlScheme = 0,
     SmartLockOn,
@@ -91,6 +113,7 @@ GLuint s_program = 0;
 GLuint s_vao = 0;
 GLuint s_vbo = 0;
 GLuint s_font_texture = 0;
+GLuint s_snp_font_texture = 0;
 GLuint s_toast_badge_texture = 0;
 std::vector<uint8_t> s_last_badge_pixels;
 GLint s_loc_screen_size = -1;
@@ -307,6 +330,52 @@ void init_gl_resources() {
     gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 128, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, texels.data());
+    gl::glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Build 128x128 S&P Cyber-Stencil font texture (top: white glyphs, bottom: gold glyphs)
+    std::vector<uint8_t> snp_texels(128 * 128 * 4, 0);
+    for (int g = 0; g < 95; ++g) {
+        int cell_x = (g % 16) * 8;
+        int cell_y = (g / 16) * 8;
+        for (int y = 0; y < 8; ++y) {
+            uint8_t row_byte = SNP_STENCIL_FONT[g][y];
+            for (int x = 0; x < 8; ++x) {
+                bool pixel_on = (row_byte >> x) & 1;
+                int px = cell_x + x;
+
+                // Top half: solid white glyphs for tinted outlines and shadows
+                int py_top = cell_y + y;
+                int offset_top = (py_top * 128 + px) * 4;
+                snp_texels[offset_top + 0] = 255;
+                snp_texels[offset_top + 1] = 255;
+                snp_texels[offset_top + 2] = 255;
+                snp_texels[offset_top + 3] = pixel_on ? 255 : 0;
+
+                // Bottom half: metallic horizon gold glyphs
+                int py_gold = 64 + cell_y + y;
+                int offset_gold = (py_gold * 128 + px) * 4;
+                snp_texels[offset_gold + 0] = SNP_GOLD_ROWS_RGB[y][0];
+                snp_texels[offset_gold + 1] = SNP_GOLD_ROWS_RGB[y][1];
+                snp_texels[offset_gold + 2] = SNP_GOLD_ROWS_RGB[y][2];
+                snp_texels[offset_gold + 3] = pixel_on ? 255 : 0;
+            }
+        }
+    }
+
+    // Set pixel (127, 63) to solid opaque white for untextured primitives
+    int snp_solid_offset = (static_cast<int>(SNP_SOLID_PIXEL_Y) * 128 + static_cast<int>(SNP_SOLID_PIXEL_X)) * 4;
+    snp_texels[snp_solid_offset + 0] = 255;
+    snp_texels[snp_solid_offset + 1] = 255;
+    snp_texels[snp_solid_offset + 2] = 255;
+    snp_texels[snp_solid_offset + 3] = 255;
+
+    gl::glGenTextures(1, &s_snp_font_texture);
+    gl::glBindTexture(GL_TEXTURE_2D, s_snp_font_texture);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, snp_texels.data());
     gl::glBindTexture(GL_TEXTURE_2D, 0);
 
     s_gl_initialized = true;
@@ -625,6 +694,7 @@ void shutdown_overlay() {
         if (SDL_GL_GetCurrentContext() != nullptr) {
             if (s_toast_badge_texture) gl::glDeleteTextures(1, &s_toast_badge_texture);
             if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
+            if (s_snp_font_texture) gl::glDeleteTextures(1, &s_snp_font_texture);
             if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
             if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
             if (s_program) gl::glDeleteProgram(s_program);
@@ -632,6 +702,7 @@ void shutdown_overlay() {
         s_toast_badge_texture = 0;
         s_last_badge_pixels.clear();
         s_font_texture = 0;
+        s_snp_font_texture = 0;
         s_vbo = 0;
         s_vao = 0;
         s_program = 0;
@@ -768,119 +839,347 @@ void render_menu(int win_w, int win_h) {
     gl::glUseProgram(0);
 }
 
+std::string to_upper_ascii(const std::string& str) {
+    std::string res;
+    res.reserve(str.size());
+    for (char c : str) {
+        res.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    return res;
+}
+
+float measure_snp_text(const std::string& text, float scale_x, float tracking) {
+    if (text.empty()) return 0.0f;
+    float total = 0.0f;
+    for (size_t i = 0; i < text.size(); ++i) {
+        char ch = text[i];
+        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
+        float adv = static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x;
+        total += adv + (i + 1 < text.size() ? tracking : 0.0f);
+    }
+    return total;
+}
+
+std::string truncate_snp_text(const std::string& text, float scale_x, float tracking, float max_w) {
+    if (max_w <= 0.0f || text.empty()) return "";
+    if (measure_snp_text(text, scale_x, tracking) <= max_w) {
+        return text;
+    }
+    float ell_w = measure_snp_text("...", scale_x, tracking);
+    std::string trimmed;
+    float cur = 0.0f;
+    for (char ch : text) {
+        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
+        float cw = static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
+        if (cur + cw + ell_w > max_w) {
+            break;
+        }
+        trimmed.push_back(ch);
+        cur += cw;
+    }
+    while (!trimmed.empty() && trimmed.back() == ' ') {
+        trimmed.pop_back();
+    }
+    return trimmed + "...";
+}
+
+void add_solid_rect_to(std::vector<OverlayVertex>& list,
+                       float x0, float y0, float x1, float y1,
+                       const ColorRgba& c) {
+    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
+    list.push_back({x1, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
+    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
+
+    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
+    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
+    list.push_back({x0, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c.r, c.g, c.b, c.a});
+}
+
+void add_vgrad_rect_to(std::vector<OverlayVertex>& list,
+                       float x0, float y0, float x1, float y1,
+                       const ColorRgba& c_top, const ColorRgba& c_bot) {
+    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_top.r, c_top.g, c_top.b, c_top.a});
+    list.push_back({x1, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_top.r, c_top.g, c_top.b, c_top.a});
+    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_bot.r, c_bot.g, c_bot.b, c_bot.a});
+
+    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_top.r, c_top.g, c_top.b, c_top.a});
+    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_bot.r, c_bot.g, c_bot.b, c_bot.a});
+    list.push_back({x0, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c_bot.r, c_bot.g, c_bot.b, c_bot.a});
+}
+
+void add_triangle_to(std::vector<OverlayVertex>& list,
+                     float x0, float y0, const ColorRgba& c0,
+                     float x1, float y1, const ColorRgba& c1,
+                     float x2, float y2, const ColorRgba& c2) {
+    list.push_back({x0, y0, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c0.r, c0.g, c0.b, c0.a});
+    list.push_back({x1, y1, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c1.r, c1.g, c1.b, c1.a});
+    list.push_back({x2, y2, SNP_SOLID_UV_U, SNP_SOLID_UV_V, c2.r, c2.g, c2.b, c2.a});
+}
+
+void add_badge_quad(std::vector<OverlayVertex>& list,
+                    float bx0, float by0, float bx1, float by1, float alpha) {
+    ColorRgba c{1.0f, 1.0f, 1.0f, alpha};
+    list.push_back({bx0, by0, 0.0f, 0.0f, c.r, c.g, c.b, c.a});
+    list.push_back({bx1, by0, 1.0f, 0.0f, c.r, c.g, c.b, c.a});
+    list.push_back({bx1, by1, 1.0f, 1.0f, c.r, c.g, c.b, c.a});
+
+    list.push_back({bx0, by0, 0.0f, 0.0f, c.r, c.g, c.b, c.a});
+    list.push_back({bx1, by1, 1.0f, 1.0f, c.r, c.g, c.b, c.a});
+    list.push_back({bx0, by1, 0.0f, 1.0f, c.r, c.g, c.b, c.a});
+}
+
+void add_snp_glyph(std::vector<OverlayVertex>& list,
+                   float x, float y, float scale_x, float scale_y,
+                   char ch, bool use_gold, const ColorRgba& c) {
+    if (ch < 32 || ch > 126) ch = '?';
+    int glyph_idx = ch - 32;
+    int col = glyph_idx % 16;
+    int row = glyph_idx / 16;
+    float v_offset = use_gold ? SNP_FONT_GOLD_ROW_OFFSET : 0.0f;
+
+    float u0 = (static_cast<float>(col) * SNP_FONT_CHAR_WIDTH) / SNP_FONT_TEX_SIZE;
+    float v0 = (v_offset + static_cast<float>(row) * SNP_FONT_CHAR_HEIGHT) / SNP_FONT_TEX_SIZE;
+    float u1 = ((static_cast<float>(col) + 1.0f) * SNP_FONT_CHAR_WIDTH) / SNP_FONT_TEX_SIZE;
+    float v1 = (v_offset + (static_cast<float>(row) + 1.0f) * SNP_FONT_CHAR_HEIGHT) / SNP_FONT_TEX_SIZE;
+
+    float w = SNP_FONT_CHAR_WIDTH * scale_x;
+    float h = SNP_FONT_CHAR_HEIGHT * scale_y;
+
+    list.push_back({x, y, u0, v0, c.r, c.g, c.b, c.a});
+    list.push_back({x + w, y, u1, v0, c.r, c.g, c.b, c.a});
+    list.push_back({x + w, y + h, u1, v1, c.r, c.g, c.b, c.a});
+
+    list.push_back({x, y, u0, v0, c.r, c.g, c.b, c.a});
+    list.push_back({x + w, y + h, u1, v1, c.r, c.g, c.b, c.a});
+    list.push_back({x, y + h, u0, v1, c.r, c.g, c.b, c.a});
+}
+
+void add_snp_text(std::vector<OverlayVertex>& list,
+                  float x, float y, float scale_x, float scale_y,
+                  const std::string& text, float tracking,
+                  bool outline_8way, int outline_px,
+                  const ColorRgba* outline_color,
+                  bool use_gold, const ColorRgba& text_color,
+                  float max_w) {
+    std::string clipped = truncate_snp_text(text, scale_x, tracking, max_w);
+    if (clipped.empty()) return;
+
+    if (outline_color != nullptr) {
+        if (outline_8way) {
+            for (int dy = -outline_px; dy <= outline_px; ++dy) {
+                for (int dx = -outline_px; dx <= outline_px; ++dx) {
+                    if (dx == 0 && dy == 0) continue;
+                    float cx = x + static_cast<float>(dx);
+                    for (char ch : clipped) {
+                        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
+                        add_snp_glyph(list, cx, y + static_cast<float>(dy), scale_x, scale_y, ch, false, *outline_color);
+                        cx += static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
+                    }
+                }
+            }
+        } else {
+            constexpr int OFFSETS[6][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {1, 1}, {0, 2}};
+            float step = static_cast<float>(outline_px);
+            for (const auto& off : OFFSETS) {
+                float cx = x + static_cast<float>(off[0]) * step;
+                for (char ch : clipped) {
+                    int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
+                    add_snp_glyph(list, cx, y + static_cast<float>(off[1]) * step, scale_x, scale_y, ch, false, *outline_color);
+                    cx += static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
+                }
+            }
+        }
+    }
+
+    float cx = x;
+    for (char ch : clipped) {
+        int code = (ch >= 32 && ch <= 126) ? static_cast<int>(ch) : static_cast<int>('?');
+        add_snp_glyph(list, cx, y, scale_x, scale_y, ch, use_gold, text_color);
+        cx += static_cast<float>(SNP_STENCIL_ADV[code - 32]) * scale_x + tracking;
+    }
+}
+
+void calculate_toast_animation(float elapsed, float duration, float& out_alpha, float& out_x_slide) {
+    out_alpha = 1.0f;
+    out_x_slide = 0.0f;
+    if (elapsed < TOAST_SLIDE_IN_DURATION) {
+        float t = elapsed / TOAST_SLIDE_IN_DURATION;
+        out_alpha = t;
+        out_x_slide = (1.0f - t) * TOAST_SLIDE_IN_OFFSET;
+    } else if (elapsed > duration - TOAST_FADE_OUT_DURATION) {
+        float t = std::clamp((duration - elapsed) / TOAST_FADE_OUT_DURATION, 0.0f, 1.0f);
+        out_alpha = t;
+        out_x_slide = (1.0f - t) * TOAST_FADE_OUT_OFFSET;
+    }
+}
+
+void build_toast_badge_well(std::vector<OverlayVertex>& toast_verts,
+                           std::vector<OverlayVertex>& badge_verts,
+                           const RaToastItem& toast,
+                           float x0, float y0, float card_h, float s,
+                           float alpha, float& out_bx1) {
+    float bsize = TOAST_BADGE_SIZE * s;
+    float bx0 = x0 + TOAST_BADGE_PAD_LEFT * s;
+    float by0 = y0 + (card_h - bsize) * 0.5f;
+    float bx1 = bx0 + bsize;
+    float by1 = by0 + bsize;
+    out_bx1 = bx1;
+
+    ColorRgba crimson_border{115.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.98f * alpha};
+    if (toast.accent_kind == 3) {
+        crimson_border = ColorRgba{185.0f / 255.0f, 28.0f / 255.0f, 12.0f / 255.0f, 0.98f * alpha};
+    }
+    ColorRgba oxblood_fill{24.0f / 255.0f, 0.0f, 0.0f, 0.96f * alpha};
+
+    add_solid_rect_to(toast_verts, bx0 - 3.0f * s, by0 - 3.0f * s, bx1 + 3.0f * s, by1 + 3.0f * s, crimson_border);
+    add_solid_rect_to(toast_verts, bx0 - 1.0f * s, by0 - 1.0f * s, bx1 + 1.0f * s, by1 + 1.0f * s, oxblood_fill);
+
+    if (!toast.rgba_pixels.empty()) {
+        add_badge_quad(badge_verts, bx0, by0, bx1, by1, alpha);
+    }
+}
+
+void build_toast_header_banner(std::vector<OverlayVertex>& toast_verts,
+                              const RaToastItem& toast,
+                              float tx, float y0, float x1, float s, float alpha) {
+    float avail = (x1 - TOAST_CARD_PAD_RIGHT * s) - tx;
+    std::string hdr_text = to_upper_ascii(toast.title);
+    float hdr_sx = 1.5f * s;
+    float hdr_sy = 1.34f * s;
+    float box_pad_x = 9.0f * s;
+    float hdr_w = measure_snp_text(hdr_text, hdr_sx, 1.0f * s);
+    if (hdr_w + box_pad_x * 2.0f > avail) {
+        hdr_sx = 1.0f * s;
+        hdr_sy = 1.0f * s;
+        hdr_w = measure_snp_text(hdr_text, hdr_sx, 1.0f * s);
+    }
+    float hbox_x0 = tx;
+    float hbox_x1 = std::min(x1 - TOAST_CARD_PAD_RIGHT * s, tx + hdr_w + box_pad_x * 2.0f);
+    float hbox_y0 = y0 + 6.0f * s;
+    float hbox_y1 = y0 + 25.0f * s;
+
+    ColorRgba crimson_border{115.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.98f * alpha};
+    if (toast.accent_kind == 3) {
+        crimson_border = ColorRgba{185.0f / 255.0f, 28.0f / 255.0f, 12.0f / 255.0f, 0.98f * alpha};
+    }
+    ColorRgba oxblood_fill{24.0f / 255.0f, 0.0f, 0.0f, 0.96f * alpha};
+
+    add_solid_rect_to(toast_verts, hbox_x0, hbox_y0, hbox_x1, hbox_y1, crimson_border);
+    add_solid_rect_to(toast_verts, hbox_x0 + 2.0f * s, hbox_y0 + 2.0f * s,
+                      hbox_x1 - 2.0f * s, hbox_y1 - 2.0f * s, oxblood_fill);
+
+    ColorRgba crimson_outline{148.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.98f * alpha};
+    ColorRgba white_tint{1.0f, 1.0f, 1.0f, alpha};
+    int outline_px = std::max(1, static_cast<int>(std::round(1.0f * s)));
+    add_snp_text(toast_verts,
+                 hbox_x0 + box_pad_x, hbox_y0 + 4.0f * s,
+                 hdr_sx, hdr_sy,
+                 hdr_text, 1.0f * s,
+                 true, outline_px, &crimson_outline,
+                 true, white_tint,
+                 (hbox_x1 - hbox_x0) - box_pad_x * 1.5f);
+}
+
+void build_toast_selection_cursor(std::vector<OverlayVertex>& toast_verts,
+                                 float tx, float row2_y, float s, float alpha) {
+    ColorRgba bronze_shadow{65.0f / 255.0f, 32.0f / 255.0f, 0.0f, 0.95f * alpha};
+    ColorRgba cursor_gold_top{1.0f, 1.0f, 0.92f, alpha};
+    ColorRgba cursor_gold_mid{1.0f, 0.85f, 0.50f, alpha};
+    ColorRgba cursor_gold_bot{1.0f, 0.72f, 0.28f, alpha};
+
+    float cy_top = row2_y + 2.0f * s;
+    float cy_mid = row2_y + 8.0f * s;
+    float cy_bot = row2_y + 14.0f * s;
+
+    // Drop shadow for '|>' cursor
+    add_solid_rect_to(toast_verts, tx + 1.0f * s, cy_top + 1.0f * s, tx + 3.0f * s, cy_bot + 1.0f * s, bronze_shadow);
+    add_triangle_to(toast_verts,
+                    tx + 5.0f * s, cy_top + 1.0f * s, bronze_shadow,
+                    tx + 11.0f * s, cy_mid + 1.0f * s, bronze_shadow,
+                    tx + 5.0f * s, cy_bot + 1.0f * s, bronze_shadow);
+
+    // Foreground '|>' cursor
+    add_vgrad_rect_to(toast_verts, tx, cy_top, tx + 2.0f * s, cy_bot, cursor_gold_top, cursor_gold_bot);
+    add_triangle_to(toast_verts,
+                    tx + 4.0f * s, cy_top, cursor_gold_top,
+                    tx + 10.0f * s, cy_mid, cursor_gold_mid,
+                    tx + 4.0f * s, cy_bot, cursor_gold_bot);
+}
+
+void build_toast_subtitle_row(std::vector<OverlayVertex>& toast_verts,
+                              const RaToastItem& toast,
+                              float tx, float row2_y, float x1, float s, float alpha) {
+    float avail = (x1 - TOAST_CARD_PAD_RIGHT * s) - tx;
+    build_toast_selection_cursor(toast_verts, tx, row2_y, s, alpha);
+
+    std::string sub_upper = to_upper_ascii(toast.subtitle);
+    float sub_scale = (sub_upper.length() <= 22 ? 2.0f : 1.0f) * s;
+    ColorRgba bronze_shadow{65.0f / 255.0f, 32.0f / 255.0f, 0.0f, 0.95f * alpha};
+    ColorRgba white_tint{1.0f, 1.0f, 1.0f, alpha};
+
+    int outline_px = std::max(1, static_cast<int>(std::round(1.0f * s)));
+    add_snp_text(toast_verts,
+                 tx + 16.0f * s, row2_y,
+                 sub_scale, sub_scale,
+                 sub_upper, 0.0f,
+                 false, outline_px, &bronze_shadow,
+                 true, white_tint,
+                 avail - 16.0f * s);
+}
+
+void build_toast_detail_row(std::vector<OverlayVertex>& toast_verts,
+                            const RaToastItem& toast,
+                            float tx, float y0, float x1, float s, float alpha) {
+    if (toast.detail.empty()) return;
+    float avail = (x1 - TOAST_CARD_PAD_RIGHT * s) - tx;
+    std::string detail_upper = to_upper_ascii(toast.detail);
+    ColorRgba detail_outline{38.0f / 255.0f, 16.0f / 255.0f, 0.0f, 0.96f * alpha};
+    ColorRgba champagne_tint{1.0f, 0.96f, 0.88f, 0.96f * alpha};
+    int outline_px = std::max(1, static_cast<int>(std::round(1.0f * s)));
+
+    add_snp_text(toast_verts,
+                 tx, y0 + 53.0f * s,
+                 1.0f * s, 1.0f * s,
+                 detail_upper, 1.0f * s,
+                 true, outline_px, &detail_outline,
+                 true, champagne_tint,
+                 avail);
+}
+
 void render_toast_card(int win_w, int win_h) {
     RaToastItem toast;
     if (!ra_get_current_toast(toast)) {
         return;
     }
 
-    float elapsed = toast.elapsed_sec;
-    float duration = toast.duration_sec;
-
     float alpha = 1.0f;
     float x_slide = 0.0f;
-    constexpr float SLIDE_IN_DURATION = 0.35f;
-    constexpr float FADE_OUT_DURATION = 0.5f;
+    calculate_toast_animation(toast.elapsed_sec, toast.duration_sec, alpha, x_slide);
 
-    if (elapsed < SLIDE_IN_DURATION) {
-        float t = elapsed / SLIDE_IN_DURATION;
-        alpha = t;
-        x_slide = (1.0f - t) * -320.0f;
-    } else if (elapsed > duration - FADE_OUT_DURATION) {
-        float t = std::clamp((duration - elapsed) / FADE_OUT_DURATION, 0.0f, 1.0f);
-        alpha = t;
-        x_slide = (1.0f - t) * -40.0f;
-    }
-
-    float scale = std::clamp(static_cast<float>(win_h) / 480.0f, 0.75f, 1.5f);
-    float card_w = std::min(static_cast<float>(win_w) - 32.0f, 500.0f * scale);
-    float card_h = 64.0f * scale;
-    float card_x0 = 16.0f * scale + x_slide;
-    float card_y0 = static_cast<float>(win_h) - card_h - 16.0f * scale;
-    float card_x1 = card_x0 + card_w;
-    float card_y1 = card_y0 + card_h;
+    float s = std::max(1.0f, std::floor(static_cast<float>(win_h) / TOAST_BASE_HEIGHT));
+    float card_w = std::min(static_cast<float>(win_w) - 32.0f, TOAST_CARD_WIDTH * s);
+    float card_h = TOAST_CARD_HEIGHT * s;
+    float x0 = TOAST_MARGIN * s + x_slide;
+    float y0 = static_cast<float>(win_h) - card_h - TOAST_MARGIN * s;
+    float x1 = x0 + card_w;
 
     std::vector<OverlayVertex> toast_vertices;
     std::vector<OverlayVertex> badge_vertices;
 
-    ColorRgba bg_color{0.06f, 0.08f, 0.12f, 0.94f * alpha};
-    ColorRgba border_color{0.95f, 0.78f, 0.20f, 0.95f * alpha};
-    ColorRgba bar_color{1.0f, 0.85f, 0.25f, 1.0f * alpha};
-    if (toast.accent_kind == 3) {
-        border_color = ColorRgba{0.85f, 0.30f, 0.25f, 0.95f * alpha};
-        bar_color = ColorRgba{1.0f, 0.35f, 0.30f, 1.0f * alpha};
-    } else if (toast.accent_kind == 1) {
-        border_color = ColorRgba{0.35f, 0.70f, 1.0f, 0.95f * alpha};
-        bar_color = ColorRgba{0.45f, 0.85f, 1.0f, 1.0f * alpha};
-    }
+    ColorRgba smoked_black{0.0f, 0.0f, 0.0f, 0.72f * alpha};
+    add_solid_rect_to(toast_vertices, x0, y0, x1, y0 + card_h, smoked_black);
 
-    auto add_quad_to = [](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1,
-                          float u0, float v0, float u1, float v1, const ColorRgba& c) {
-        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
-        list.push_back({x1, y0, u1, v0, c.r, c.g, c.b, c.a});
-        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
-        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
-        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
-        list.push_back({x0, y1, u0, v1, c.r, c.g, c.b, c.a});
-    };
+    float bx1 = 0.0f;
+    build_toast_badge_well(toast_vertices, badge_vertices, toast, x0, y0, card_h, s, alpha, bx1);
 
-    auto add_rect_to = [&](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1, const ColorRgba& c) {
-        add_quad_to(list, x0, y0, x1, y1, SOLID_UV_U, SOLID_UV_V, SOLID_UV_U, SOLID_UV_V, c);
-    };
+    float tx = bx1 + TOAST_BADGE_PAD_RIGHT * s;
 
-    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y1, bg_color);
-    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y0 + 1.5f, border_color);
-    add_rect_to(toast_vertices, card_x0, card_y1 - 1.5f, card_x1, card_y1, border_color);
-    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 1.5f, card_y1, border_color);
-    add_rect_to(toast_vertices, card_x1 - 1.5f, card_y0, card_x1, card_y1, border_color);
-    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 4.0f * scale, card_y1, bar_color);
+    build_toast_header_banner(toast_vertices, toast, tx, y0, x1, s, alpha);
 
-    float badge_size = 46.0f * scale;
-    float badge_x0 = card_x0 + 10.0f * scale;
-    float badge_y0 = card_y0 + (card_h - badge_size) * 0.5f;
-    float badge_x1 = badge_x0 + badge_size;
-    float badge_y1 = badge_y0 + badge_size;
+    float row2_y = y0 + 30.0f * s;
+    build_toast_subtitle_row(toast_vertices, toast, tx, row2_y, x1, s, alpha);
 
-    bool has_badge = !toast.rgba_pixels.empty();
-    if (has_badge) {
-        ColorRgba badge_col{1.0f, 1.0f, 1.0f, alpha};
-        add_quad_to(badge_vertices, badge_x0, badge_y0, badge_x1, badge_y1, 0.0f, 0.0f, 1.0f, 1.0f, badge_col);
-    }
-
-    float text_x = badge_x1 + 10.0f * scale;
-    float crisp_scale = std::max(1.0f, std::floor(scale));
-
-    auto add_string_to = [&](std::vector<OverlayVertex>& list, float x, float y, float s, const std::string& str, const ColorRgba& c) {
-        float avail_w = (card_x1 - 8.0f * scale) - x;
-        size_t max_chars = avail_w > 0.0f ? static_cast<size_t>(avail_w / (FONT_CHAR_WIDTH * s)) : 0;
-        std::string clipped = str;
-        if (clipped.size() > max_chars) {
-            clipped = (max_chars > 3) ? (clipped.substr(0, max_chars - 3) + "...") : clipped.substr(0, max_chars);
-        }
-        float cx = x;
-        for (char ch : clipped) {
-            if (ch < 32 || ch > 126) ch = '?';
-            int glyph = ch - 32;
-            int col = glyph % 16;
-            int row = glyph / 16;
-            float u0 = (col * 8) / 128.0f;
-            float v0 = (row * 8) / 64.0f;
-            float u1 = (col * 8 + 8) / 128.0f;
-            float v1 = (row * 8 + 8) / 64.0f;
-            add_quad_to(list, cx, y, cx + FONT_CHAR_WIDTH * s, y + FONT_CHAR_HEIGHT * s, u0, v0, u1, v1, c);
-            cx += FONT_CHAR_WIDTH * s;
-        }
-    };
-
-    ColorRgba title_color = (toast.accent_kind == 0) ? ColorRgba{1.0f, 0.84f, 0.20f, alpha} : ColorRgba{0.45f, 0.85f, 1.0f, alpha};
-    ColorRgba sub_color{1.0f, 1.0f, 1.0f, alpha};
-    ColorRgba detail_color{0.75f, 0.80f, 0.88f, 0.90f * alpha};
-
-    add_string_to(toast_vertices, text_x, card_y0 + 10.0f * scale, crisp_scale, toast.title, title_color);
-    add_string_to(toast_vertices, text_x, card_y0 + 26.0f * scale, crisp_scale * 1.25f, toast.subtitle, sub_color);
-    if (!toast.detail.empty()) {
-        add_string_to(toast_vertices, text_x, card_y0 + 45.0f * scale, crisp_scale, toast.detail, detail_color);
-    }
+    build_toast_detail_row(toast_vertices, toast, tx, y0, x1, s, alpha);
 
     gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
     gl::glViewport(0, 0, win_w, win_h);
@@ -900,12 +1199,12 @@ void render_toast_card(int win_w, int win_h) {
     if (!toast_vertices.empty()) {
         gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
         gl::glBufferData(GL_ARRAY_BUFFER, toast_vertices.size() * sizeof(OverlayVertex), toast_vertices.data(), GL_STREAM_DRAW);
-        gl::glBindTexture(GL_TEXTURE_2D, s_font_texture);
+        gl::glBindTexture(GL_TEXTURE_2D, s_snp_font_texture);
         gl::glBindVertexArray(s_vao);
         gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(toast_vertices.size()));
     }
 
-    if (has_badge && !badge_vertices.empty()) {
+    if (!toast.rgba_pixels.empty() && !badge_vertices.empty()) {
         if (s_toast_badge_texture == 0) {
             gl::glGenTextures(1, &s_toast_badge_texture);
             gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
