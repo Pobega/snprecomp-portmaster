@@ -7,7 +7,7 @@
 ## Game Information
 - **Title:** Sin and Punishment
 - **Porter:** SerPbone
-- **URL:** https://github.com/Pobega/snprecomp
+- **URL:** https://github.com/Pobega/snprecomp-portmaster
 - **Instructions:** Copy your legally obtained Sin and Punishment Nintendo 64 ROM (.z64, .n64, or .v64) into ports/sinandpunishment/roms/ before launching.
 
 ## Controls
