@@ -29,3 +29,12 @@ target_link_libraries(test_gles3_renderer PRIVATE
     ${SDL2_LIBRARIES}
     dl
 )
+
+add_executable(test_snp_patch
+    test_snp_patch.cpp
+)
+
+target_include_directories(test_snp_patch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tools
+)
+

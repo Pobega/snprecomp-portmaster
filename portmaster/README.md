@@ -2,7 +2,9 @@
 
 Special thanks to [wootbeer](https://github.com/wootbeer/snprecomp) for creating `snprecomp`, [Wiseguy](https://github.com/N64Recomp/N64ModernRuntime) for `N64Recomp` and `N64ModernRuntime`, and Treasure for the original Nintendo 64 rail shooter and its tight blend of free-aimed gunplay and close-range sword parrying.
 
-To play, copy your legally obtained Nintendo 64 cartridge dump (`.z64`, `.n64`, or `.v64`) into `ports/sinandpunishment/roms/` before launching.
+To play, copy your legally obtained Nintendo 64 cartridge dump (`.z64`, `.n64`, or `.v64`) into `ports/sinandpunishment/roms/` before launching. Optional community translation patches (`.bps`, `.ups`, `.ips`, `.xdelta`) placed in `ports/sinandpunishment/roms/` will be verified and applied automatically on first boot.
+
+On first boot, PortMaster verifies and normalizes your ROM, applies any optional translation patch, reconstructs the game binary from the clean-room ROM-keyed `snp.patch`, and caches the verified ROM for zero-write instant fast boot on subsequent launches.
 
 First boot automatically selects `Stickless: Strafe + Shift` on stickless/single-stick handhelds and `Twin Stick` on dual-stick handhelds. You can press `Select` or `Menu` at any time during gameplay to open the Quick Settings overlay and customize control schemes, aiming curves, sensitivity, and graphics options.
 
@@ -38,13 +40,13 @@ git apply /path/to/patches/snprecomp-portmaster-gles3.patch
 
 # Build host tools and patches
 cmake -B build-host -G Ninja -DSNP_BACKEND_GLES3=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build-host --target file_to_c N64RecompCLI RSPRecomp PatchesLib
+cmake --build build-host --target file_to_c N64RecompCLI RSPRecomp PatchesLib snp-patch
 
 # Generate C code and audio microcode from Japanese ROM
 ./build-host/N64RecompCLI snp.jp.toml
 ./build-host/RSPRecomp n_aspMain.jp.toml
 
-# Cross-compile SnPRecompiled for aarch64
+# Cross-compile SnPRecompiled and snp-patch for aarch64
 cmake -B build-aarch64 -G Ninja \
   -DCMAKE_SYSTEM_NAME=Linux \
   -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
@@ -56,5 +58,11 @@ cmake -B build-aarch64 -G Ninja \
   -DCMAKE_C_FLAGS="-march=armv8-a -ffp-contract=off" \
   -DCMAKE_CXX_FLAGS="-march=armv8-a -ffp-contract=off" \
   -DSNP_HOST_TOOLS_DIR="$PWD/build-host"
-ninja -C build-aarch64 SnPRecompiled
+ninja -C build-aarch64 SnPRecompiled snp-patch
+aarch64-linux-gnu-strip build-aarch64/SnPRecompiled build-aarch64/snp-patch
+
+# Generate clean-room ROM-keyed snp.patch
+gzip -9 -n -c build-aarch64/SnPRecompiled > build-aarch64/SnPRecompiled.gz
+./build-host/snp-patch --crypt "/path/to/rom.z64" build-aarch64/SnPRecompiled.gz portmaster/sinandpunishment/snp.patch
+rm -f build-aarch64/SnPRecompiled.gz
 ```

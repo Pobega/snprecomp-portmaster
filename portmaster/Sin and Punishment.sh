@@ -27,15 +27,39 @@ export SNP_ROM_DIR="$GAMEDIR/roms"
 export ANALOG_STICKS
 
 shopt -s nullglob nocaseglob
-rom_files=("$GAMEDIR/roms/"*.{z64,n64,v64} "$GAMEDIR/"*.{z64,n64,v64})
+raw_user_patches=("$GAMEDIR/roms/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff} "$GAMEDIR/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff})
 shopt -u nullglob nocaseglob
-if [ ${#rom_files[@]} -eq 0 ]; then
-  pm_show_error "Copy your legally obtained Sin and Punishment Nintendo 64 ROM (.z64, .n64, or .v64) into ports/sinandpunishment/roms/ and launch again." --title "ROM missing" --type warning
-  pm_finish
-  exit 1
-fi
 
-$ESUDO chmod +x "$GAMEDIR/$BINARY"
+user_patches=()
+for p in "${raw_user_patches[@]}"; do
+  if [ "$(basename "$p")" != "snp.patch" ]; then
+    user_patches+=("$p")
+  fi
+done
+
+if [ -f "$GAMEDIR/snp.patch" ] || \
+   [ ! -x "$GAMEDIR/$BINARY" ] || \
+   ( [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] && [ ! -f "$GAMEDIR/snp.n64.jp.1.0.z64" ] ) || \
+   ( [ ${#user_patches[@]} -gt 0 ] && [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] ); then
+  chmod +x "$GAMEDIR/tools/patchscript" "$GAMEDIR/tools/snp-patch" 2>/dev/null || true
+  PATCHER_FILE="$GAMEDIR/tools/patchscript"
+  PATCHER_GAME="$(basename "${0%.*}")"
+  PATCHER_TIME="about 5 seconds"
+  export PATCHER_FILE PATCHER_GAME PATCHER_TIME controlfolder ESUDO DEVICE_ARCH GAMEDIR BINARY
+
+  if [ -f "$controlfolder/utils/patcher.txt" ]; then
+    source "$controlfolder/utils/patcher.txt"
+  else
+    pm_show_error "This port requires the latest version of PortMaster." --title "Update required"
+    pm_finish
+    exit 1
+  fi
+
+  if [ ! -x "$GAMEDIR/$BINARY" ] || ( [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] && [ ! -f "$GAMEDIR/snp.n64.jp.1.0.z64" ] ); then
+    pm_finish
+    exit 1
+  fi
+fi
 
 $GPTOKEYB2 "snprecompiled" > /dev/null 2>&1 &
 

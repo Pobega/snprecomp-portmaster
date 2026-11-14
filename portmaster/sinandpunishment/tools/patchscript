@@ -1,0 +1,189 @@
+#!/bin/bash
+set -euo pipefail
+
+GAMEDIR="${GAMEDIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "$GAMEDIR"
+
+LOGFILE="$GAMEDIR/patchlog.txt"
+: > "$LOGFILE"
+
+cleanup() {
+  rm -f "$GAMEDIR/snp.tmp" "$GAMEDIR/"*.z64.tmp "$GAMEDIR/xdelta_src.tmp.z64" "$GAMEDIR/xdelta_out.tmp.z64" "$GAMEDIR/normalized_rom.z64" 2>/dev/null || true
+}
+cleanup
+trap cleanup EXIT
+
+log_msg() {
+  echo "$@"
+  echo "$@" >> "$LOGFILE"
+}
+
+fail_patch() {
+  local msg="$1"
+  log_msg "Error: $msg"
+  log_msg "PATCH_FAIL_MSG:$msg"
+  log_msg "Patching process failed!"
+  exit 1
+}
+
+log_msg "=== Sin and Punishment First-Time Setup & ROM Verification ==="
+
+mkdir -p "$GAMEDIR/roms" "$GAMEDIR/saves"
+
+has_stored_rom=0
+if [ -f "$GAMEDIR/snp.n64.en.fan.z64" ] || [ -f "$GAMEDIR/snp.n64.jp.1.0.z64" ]; then
+  has_stored_rom=1
+fi
+
+if [ -f "$GAMEDIR/snp.patch" ] || [ "$has_stored_rom" -eq 0 ]; then
+  avail_kb=$(df -Pk "$GAMEDIR" 2>/dev/null | awk 'NR==2 {print $4}')
+  if [ -n "${avail_kb:-}" ]; then
+    needed_kb=20480
+    if [ "$has_stored_rom" -eq 0 ]; then
+      needed_kb=65536
+    fi
+    if [ "$avail_kb" -lt "$needed_kb" ]; then
+      fail_patch "Insufficient free disk space (${avail_kb} KB available, need at least $((needed_kb / 1024)) MB)."
+    fi
+  fi
+fi
+
+shopt -s nullglob nocaseglob
+raw_candidates=("$GAMEDIR/roms/"*.z64 "$GAMEDIR/roms/"*.n64 "$GAMEDIR/roms/"*.v64 \
+                "$GAMEDIR/"*.z64 "$GAMEDIR/"*.n64 "$GAMEDIR/"*.v64)
+shopt -u nullglob nocaseglob
+
+candidate_roms=()
+for r in "${raw_candidates[@]}"; do
+  bn="$(basename "$r")"
+  case "$bn" in
+    snp.n64.jp.1.0.z64|snp.n64.en.fan.z64|*.tmp*|normalized_rom.z64)
+      continue
+      ;;
+    *)
+      candidate_roms+=("$r")
+      ;;
+  esac
+done
+
+shopt -s nullglob nocaseglob
+raw_patches=("$GAMEDIR/roms/"*.bps "$GAMEDIR/roms/"*.ups "$GAMEDIR/roms/"*.ips "$GAMEDIR/roms/"*.xdelta "$GAMEDIR/roms/"*.xdelta3 "$GAMEDIR/roms/"*.vcdiff \
+             "$GAMEDIR/"*.bps "$GAMEDIR/"*.ups "$GAMEDIR/"*.ips "$GAMEDIR/"*.xdelta "$GAMEDIR/"*.xdelta3 "$GAMEDIR/"*.vcdiff)
+shopt -u nullglob nocaseglob
+
+user_patches=()
+for p in "${raw_patches[@]}"; do
+  bn="$(basename "$p")"
+  if [ "$bn" != "snp.patch" ]; then
+    user_patches+=("$p")
+  fi
+done
+
+USER_PATCH="${user_patches[0]:-}"
+VERIFIED_ROM=""
+LAST_ERR=""
+
+if [ ${#candidate_roms[@]} -gt 0 ]; then
+  for rom in "${candidate_roms[@]}"; do
+    log_msg "Processing candidate ROM: $(basename "$rom")"
+    if [ -n "$USER_PATCH" ]; then
+      ext="${USER_PATCH##*.}"
+      ext="$(echo "$ext" | tr '[:upper:]' '[:lower:]')"
+      if [ "$ext" = "xdelta" ] || [ "$ext" = "xdelta3" ] || [ "$ext" = "vcdiff" ]; then
+        log_msg "Detected user delta translation patch: $(basename "$USER_PATCH")"
+        verify_out=""
+        if verify_out=$("$GAMEDIR/tools/snp-patch" --verify "$rom" 2>> "$LOGFILE") && echo "$verify_out" | grep -q 'GAME_ID=snp.n64.en.fan'; then
+          log_msg "ROM is already a valid English release; setting up directly..."
+          if setup_out=$("$GAMEDIR/tools/snp-patch" --setup-rom "$rom" "$GAMEDIR" 2>&1 | tee -a "$LOGFILE"); then
+            VERIFIED_ROM="$(echo "$setup_out" | sed -n 's/^STORED_ROM=//p' | tail -n 1)"
+            break
+          else
+            LAST_ERR="$(echo "$setup_out" | tail -n 1 | sed 's/^snp-patch: //')"
+          fi
+        else
+          XDELTA_BIN=""
+          if [ -n "${controlfolder:-}" ] && [ -x "${controlfolder}/xdelta3" ]; then
+            XDELTA_BIN="${controlfolder}/xdelta3"
+          elif command -v xdelta3 >/dev/null 2>&1; then
+            XDELTA_BIN="$(command -v xdelta3)"
+          fi
+
+          if [ -z "$XDELTA_BIN" ]; then
+            fail_patch "xdelta3 not found to apply $(basename "$USER_PATCH"). Use a .bps/.ups patch or pre-patch your ROM."
+          fi
+
+          log_msg "Normalizing input ROM for xdelta..."
+          if ! "$GAMEDIR/tools/snp-patch" --normalize "$rom" "$GAMEDIR/xdelta_src.tmp.z64" 2>&1 | tee -a "$LOGFILE"; then
+            LAST_ERR="Failed to normalize input ROM for xdelta"
+            continue
+          fi
+
+          log_msg "Applying $(basename "$USER_PATCH") with xdelta3..."
+          if ! "$XDELTA_BIN" -d -f -s "$GAMEDIR/xdelta_src.tmp.z64" "$USER_PATCH" "$GAMEDIR/xdelta_out.tmp.z64" 2>&1 | tee -a "$LOGFILE"; then
+            LAST_ERR="xdelta3 patch application failed"
+            continue
+          fi
+
+          if setup_out=$("$GAMEDIR/tools/snp-patch" --setup-rom "$GAMEDIR/xdelta_out.tmp.z64" "$GAMEDIR" 2>&1 | tee -a "$LOGFILE"); then
+            VERIFIED_ROM="$(echo "$setup_out" | sed -n 's/^STORED_ROM=//p' | tail -n 1)"
+            break
+          else
+            LAST_ERR="$(echo "$setup_out" | tail -n 1 | sed 's/^snp-patch: //')"
+          fi
+        fi
+      else
+        log_msg "Applying translation patch $(basename "$USER_PATCH")..."
+        if setup_out=$("$GAMEDIR/tools/snp-patch" --setup-rom "$rom" "$GAMEDIR" --patch "$USER_PATCH" 2>&1 | tee -a "$LOGFILE"); then
+          VERIFIED_ROM="$(echo "$setup_out" | sed -n 's/^STORED_ROM=//p' | tail -n 1)"
+          break
+        else
+          LAST_ERR="$(echo "$setup_out" | tail -n 1 | sed 's/^snp-patch: //')"
+        fi
+      fi
+    else
+      if setup_out=$("$GAMEDIR/tools/snp-patch" --setup-rom "$rom" "$GAMEDIR" 2>&1 | tee -a "$LOGFILE"); then
+        VERIFIED_ROM="$(echo "$setup_out" | sed -n 's/^STORED_ROM=//p' | tail -n 1)"
+      else
+        LAST_ERR="$(echo "$setup_out" | tail -n 1 | sed 's/^snp-patch: //')"
+      fi
+    fi
+  done
+fi
+
+if [ -z "$VERIFIED_ROM" ]; then
+  if [ -f "$GAMEDIR/snp.n64.en.fan.z64" ] && "$GAMEDIR/tools/snp-patch" --verify "$GAMEDIR/snp.n64.en.fan.z64" >/dev/null 2>&1; then
+    VERIFIED_ROM="$GAMEDIR/snp.n64.en.fan.z64"
+  elif [ -f "$GAMEDIR/snp.n64.jp.1.0.z64" ] && "$GAMEDIR/tools/snp-patch" --verify "$GAMEDIR/snp.n64.jp.1.0.z64" >/dev/null 2>&1; then
+    VERIFIED_ROM="$GAMEDIR/snp.n64.jp.1.0.z64"
+  fi
+fi
+
+if [ -z "$VERIFIED_ROM" ]; then
+  if [ ${#candidate_roms[@]} -eq 0 ]; then
+    fail_patch "No Sin and Punishment ROM found. Copy your .z64, .n64, or .v64 ROM into ports/sinandpunishment/roms/."
+  elif [ -n "$USER_PATCH" ]; then
+    fail_patch "Failed to apply $(basename "$USER_PATCH") or verify ROM: ${LAST_ERR:-provide an unaltered Japanese v1.0 Sin and Punishment ROM}."
+  else
+    fail_patch "Unsupported or corrupted ROM. Only Sin and Punishment (Japan v1.0 or compatible translation) N64 ROMs are supported."
+  fi
+fi
+
+TARGET_BIN="$GAMEDIR/${BINARY:-snprecompiled.${DEVICE_ARCH:-aarch64}}"
+if [ -f "$GAMEDIR/snp.patch" ]; then
+  log_msg "Reconstructing game executable from ROM keystream..."
+  if ! "$GAMEDIR/tools/snp-patch" --crypt "$VERIFIED_ROM" "$GAMEDIR/snp.patch" - 2>> "$LOGFILE" | gzip -dc > "$GAMEDIR/snp.tmp"; then
+    fail_patch "Failed to decrypt game executable."
+  fi
+  if [ ! -s "$GAMEDIR/snp.tmp" ]; then
+    fail_patch "Reconstructed executable is empty or corrupted."
+  fi
+  chmod +x "$GAMEDIR/snp.tmp"
+  mv "$GAMEDIR/snp.tmp" "$TARGET_BIN"
+  rm -f "$GAMEDIR/snp.patch" "$GAMEDIR/SnPRecompiled"
+fi
+
+if [ ! -x "$TARGET_BIN" ]; then
+  fail_patch "Game executable missing and snp.patch not found. Please reinstall the port."
+fi
+
+log_msg "Patching process completed successfully!"

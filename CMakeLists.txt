@@ -691,3 +691,12 @@ if (MSVC)
     target_link_options(SnPRecompiled PRIVATE /DEBUG /OPT:REF /OPT:ICF)
     target_link_libraries(SnPRecompiled PRIVATE Dbghelp.lib)
 endif()
+
+if (SNP_BACKEND_GLES3)
+    add_executable(snp-patch ${CMAKE_SOURCE_DIR}/tools/snp_patch.cpp)
+    target_include_directories(snp-patch PRIVATE ${CMAKE_SOURCE_DIR}/tools)
+    if (CMAKE_SYSTEM_NAME MATCHES "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_link_libraries(snp-patch PRIVATE -static-libstdc++ -static-libgcc)
+    endif()
+endif()
+

@@ -95,10 +95,19 @@ snp-interp-log
 # PortMaster & handheld artifacts
 portmaster/sinandpunishment/SnPRecompiled
 portmaster/sinandpunishment/snprecompiled.*
+portmaster/sinandpunishment/snp.patch
+portmaster/sinandpunishment/patchlog.txt
+portmaster/sinandpunishment/tools/snp-patch
 portmaster/sinandpunishment/log.txt
 portmaster/sinandpunishment/roms/*.z64
 portmaster/sinandpunishment/roms/*.n64
 portmaster/sinandpunishment/roms/*.v64
+portmaster/sinandpunishment/roms/*.bps
+portmaster/sinandpunishment/roms/*.ups
+portmaster/sinandpunishment/roms/*.ips
+portmaster/sinandpunishment/roms/*.xdelta
+portmaster/sinandpunishment/roms/*.xdelta3
+portmaster/sinandpunishment/roms/*.vcdiff
 portmaster/sinandpunishment/saves/*
 !portmaster/sinandpunishment/saves/.gitkeep
 *.ppm

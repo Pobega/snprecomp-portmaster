@@ -35,14 +35,14 @@ if [ ! -f "$ROM_JP" ]; then
 fi
 
 # Build host tools and patches if not already built
-if [ ! -f "$REPO_ROOT/RecompiledPatches/patches.c" ] || [ ! -f "$REPO_ROOT/build-host/file_to_c" ]; then
-    echo "Configuring and building host tools (file_to_c, N64RecompCLI, RSPRecomp, PatchesLib)..."
+if [ ! -f "$REPO_ROOT/RecompiledPatches/patches.c" ] || [ ! -f "$REPO_ROOT/build-host/file_to_c" ] || [ ! -f "$REPO_ROOT/build-host/snp-patch" ]; then
+    echo "Configuring and building host tools (file_to_c, N64RecompCLI, RSPRecomp, PatchesLib, snp-patch)..."
     $TOOLBOX_CMD cmake -B build-host -G Ninja \
         -DSNP_BACKEND_GLES3=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER=clang \
         -DCMAKE_CXX_COMPILER=clang++
-    $TOOLBOX_CMD cmake --build build-host --target file_to_c N64RecompCLI RSPRecomp PatchesLib
+    $TOOLBOX_CMD cmake --build build-host --target file_to_c N64RecompCLI RSPRecomp PatchesLib snp-patch
 fi
 
 # Locate host recompiler binaries (CMAKE_RUNTIME_OUTPUT_DIRECTORY outputs directly to build-host/)
@@ -77,13 +77,13 @@ fi
 
 # 2. Containerized Cross-Compilation (Ubuntu 20.04 Focal for glibc 2.31 compatibility)
 PACKAGE_ONLY="${PACKAGE_ONLY:-0}"
-if [ "$PACKAGE_ONLY" = "1" ] && [ -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" ]; then
-    echo "--> PACKAGE_ONLY=1 set and binary exists; skipping cross-compilation."
+if [ "$PACKAGE_ONLY" = "1" ] && [ -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" ] && [ -f "$REPO_ROOT/build-portmaster-aarch64/snp-patch" ]; then
+    echo "--> PACKAGE_ONLY=1 set and binaries exist; skipping cross-compilation."
 else
     echo "--> Checking/building cached container toolchain image..."
     IMAGE_TAG="localhost/snprecomp-focal-arm64:latest"
-    if ! $PODMAN_CMD image exists "$IMAGE_TAG"; then
-        echo "Building $IMAGE_TAG..."
+    if ! $PODMAN_CMD image exists "$IMAGE_TAG" || ! $PODMAN_CMD run --rm "$IMAGE_TAG" which g++ >/dev/null 2>&1; then
+        echo "Building/updating $IMAGE_TAG..."
         $PODMAN_CMD build -t "$IMAGE_TAG" - << "EOF"
 FROM docker.io/library/ubuntu:20.04
 ENV DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
@@ -100,6 +100,7 @@ RUN dpkg --add-architecture arm64 && \
     apt-get install -y --no-install-recommends \
         ninja-build \
         gcc \
+        g++ \
         libc6-dev \
         g++-10-aarch64-linux-gnu \
         gcc-10-aarch64-linux-gnu \
@@ -128,6 +129,8 @@ mkdir -p build-host-focal
 if [ ! -x build-host-focal/file_to_c ]; then
     gcc -O2 tools/file_to_c.c -o build-host-focal/file_to_c
 fi
+g++ -O2 -std=c++17 tools/snp_patch.cpp -Itools -o build-host-focal/snp-patch
+
 BUILD_DIR="build-portmaster-aarch64"
 mkdir -p "$BUILD_DIR"
 export PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
@@ -147,28 +150,75 @@ if [ ! -f "$BUILD_DIR/build.ninja" ]; then
         -DCMAKE_FIND_ROOT_PATH="/usr/aarch64-linux-gnu;/usr/lib/aarch64-linux-gnu"
 fi
 
-ninja -C "$BUILD_DIR" -j"$(nproc)" SnPRecompiled
-aarch64-linux-gnu-strip "$BUILD_DIR/SnPRecompiled"
+ninja -C "$BUILD_DIR" -j"$(nproc)" SnPRecompiled snp-patch
+aarch64-linux-gnu-strip "$BUILD_DIR/SnPRecompiled" "$BUILD_DIR/snp-patch"
 '
 fi
 
 # 3. Generate upstream patch
 echo "--> Generating PortMaster GLES3 patch..."
 mkdir -p "$REPO_ROOT/portmaster/patches"
+git add -N tools/snp_patch.cpp tools/snp_patch_lib.h tests/test_snp_patch.cpp 2>/dev/null || true
 git diff 6e76c24c84e6fc65faeae89e8e75d7fac92aba1f -- \
     CMakeLists.txt include/ lib-patches/ src/ tests/ \
     tools/file_to_c.c tools/file_to_c.py tools/prepare_rom_for_recomp.py \
+    tools/snp_patch.cpp tools/snp_patch_lib.h \
     > "$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch"
 
-# 4. Copy stripped aarch64 binary
-echo "--> Staging aarch64 binary..."
-mkdir -p "$REPO_ROOT/portmaster/sinandpunishment"
-cp -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" "$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64"
-chmod +x "$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64"
-chmod +x "$REPO_ROOT/portmaster/Sin and Punishment.sh"
-rm -f "$REPO_ROOT/portmaster/sinandpunishment/SnPRecompiled"
+# 4. Locate host snp-patch and valid build ROM for keystream encryption
+echo "--> Locating valid build ROM for keystream encryption..."
+SNP_PATCH_HOST=""
+if [ -x "$REPO_ROOT/build-host-focal/snp-patch" ]; then
+    SNP_PATCH_HOST="$REPO_ROOT/build-host-focal/snp-patch"
+elif [ -x "$REPO_ROOT/build-host/snp-patch" ]; then
+    SNP_PATCH_HOST="$REPO_ROOT/build-host/snp-patch"
+else
+    mkdir -p "$REPO_ROOT/build-host-focal"
+    $TOOLBOX_CMD g++ -O2 -std=c++17 "$REPO_ROOT/tools/snp_patch.cpp" -I"$REPO_ROOT/tools" -o "$REPO_ROOT/build-host-focal/snp-patch"
+    SNP_PATCH_HOST="$REPO_ROOT/build-host-focal/snp-patch"
+fi
 
-# 5. Assemble the 3 clean distribution outputs
+KEY_ROM=""
+if [ -n "${SNP_BUILD_ROM:-}" ] && [ -f "$SNP_BUILD_ROM" ]; then
+    if "$SNP_PATCH_HOST" --verify "$SNP_BUILD_ROM" >/dev/null 2>&1; then
+        KEY_ROM="$SNP_BUILD_ROM"
+    fi
+fi
+
+if [ -z "$KEY_ROM" ]; then
+    shopt -s nullglob nocaseglob
+    rom_candidates=("$REPO_ROOT/"*.{z64,n64,v64} "$REPO_ROOT/roms/"*.{z64,n64,v64})
+    shopt -u nullglob nocaseglob
+    for cand in "${rom_candidates[@]}"; do
+        if "$SNP_PATCH_HOST" --verify "$cand" >/dev/null 2>&1; then
+            KEY_ROM="$cand"
+            break
+        fi
+    done
+fi
+
+if [ -z "$KEY_ROM" ]; then
+    echo "Error: No valid Sin and Punishment Nintendo 64 ROM found to generate snp.patch."
+    echo "Place an unaltered Japanese or verified English Sin and Punishment ROM in $REPO_ROOT or set SNP_BUILD_ROM."
+    exit 1
+fi
+echo "Using build ROM for keystream encryption: $(basename "$KEY_ROM")"
+
+# 5. Compress and encrypt snp.patch
+echo "--> Generating clean-room ROM-keyed snp.patch..."
+mkdir -p "$REPO_ROOT/portmaster/sinandpunishment"
+gzip -9 -n -c "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" > "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled.gz"
+"$SNP_PATCH_HOST" --crypt "$KEY_ROM" "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled.gz" "$REPO_ROOT/portmaster/sinandpunishment/snp.patch"
+rm -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled.gz"
+
+mkdir -p "$REPO_ROOT/portmaster/sinandpunishment/tools"
+cp -f "$REPO_ROOT/build-portmaster-aarch64/snp-patch" "$REPO_ROOT/portmaster/sinandpunishment/tools/snp-patch"
+chmod +x "$REPO_ROOT/portmaster/sinandpunishment/tools/snp-patch"
+chmod +x "$REPO_ROOT/portmaster/sinandpunishment/tools/patchscript"
+chmod +x "$REPO_ROOT/portmaster/Sin and Punishment.sh"
+rm -f "$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64" "$REPO_ROOT/portmaster/sinandpunishment/SnPRecompiled"
+
+# 6. Assemble the 2 clean distribution outputs
 echo "--> Assembling distribution outputs in dist/..."
 mkdir -p "$REPO_ROOT/dist"
 
@@ -180,6 +230,7 @@ mkdir -p "$PR_DIR/patches"
 mkdir -p "$PR_DIR/sinandpunishment/licenses"
 mkdir -p "$PR_DIR/sinandpunishment/roms"
 mkdir -p "$PR_DIR/sinandpunishment/saves"
+mkdir -p "$PR_DIR/sinandpunishment/tools"
 
 cp -f "$REPO_ROOT/portmaster/port.json" "$PR_DIR/"
 cp -f "$REPO_ROOT/portmaster/README.md" "$PR_DIR/"
@@ -188,8 +239,11 @@ cp -f "$REPO_ROOT/portmaster/screenshot.png" "$PR_DIR/"
 cp -f "$REPO_ROOT/portmaster/Sin and Punishment.sh" "$PR_DIR/"
 cp -f "$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch" "$PR_DIR/patches/"
 
-cp -f "$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64" "$PR_DIR/sinandpunishment/"
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/snp.patch" "$PR_DIR/sinandpunishment/"
 cp -f "$REPO_ROOT/portmaster/sinandpunishment/snprecomp.toml" "$PR_DIR/sinandpunishment/"
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/tools/snp-patch" "$PR_DIR/sinandpunishment/tools/"
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/tools/patchscript" "$PR_DIR/sinandpunishment/tools/"
+chmod +x "$PR_DIR/sinandpunishment/tools/snp-patch" "$PR_DIR/sinandpunishment/tools/patchscript" "$PR_DIR/Sin and Punishment.sh"
 cp -rf "$REPO_ROOT/portmaster/sinandpunishment/licenses/"* "$PR_DIR/sinandpunishment/licenses/"
 touch "$PR_DIR/sinandpunishment/roms/.gitkeep"
 touch "$PR_DIR/sinandpunishment/saves/.gitkeep"
@@ -202,21 +256,25 @@ rm -f "$DIST_ZIP"
 python3 -c "
 import os, zipfile
 
-def add_entry(z, src, arcname):
-    is_exec = arcname.endswith('.sh') or 'snprecompiled' in os.path.basename(arcname)
+def add_entry(z, src, arcname, compress=zipfile.ZIP_DEFLATED):
+    is_exec = arcname.endswith('.sh') or arcname.endswith('patchscript') or os.path.basename(arcname) == 'snp-patch'
     mode = 0o100755 if is_exec else 0o100644
     zinfo = zipfile.ZipInfo.from_file(src, arcname)
     zinfo.external_attr = mode << 16
     with open(src, 'rb') as f:
-        z.writestr(zinfo, f.read(), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(zinfo, f.read(), compress_type=compress)
 
 dist_zip = '$DIST_ZIP'
 with zipfile.ZipFile(dist_zip, 'w', zipfile.ZIP_DEFLATED) as z:
     add_entry(z, '$REPO_ROOT/portmaster/Sin and Punishment.sh', 'Sin and Punishment.sh')
     for bf in ['port.json', 'README.md', 'gameinfo.xml', 'screenshot.png', 'testing_thread.txt']:
-        add_entry(z, os.path.join('$REPO_ROOT/portmaster', bf), os.path.join('sinandpunishment', bf))
+        p = os.path.join('$REPO_ROOT/portmaster', bf)
+        if os.path.exists(p):
+            add_entry(z, p, os.path.join('sinandpunishment', bf))
     add_entry(z, '$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch', 'sinandpunishment/patches/snprecomp-portmaster-gles3.patch')
-    add_entry(z, '$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64', 'sinandpunishment/snprecompiled.aarch64')
+    add_entry(z, '$REPO_ROOT/portmaster/sinandpunishment/snp.patch', 'sinandpunishment/snp.patch', compress=zipfile.ZIP_STORED)
+    add_entry(z, '$REPO_ROOT/portmaster/sinandpunishment/tools/patchscript', 'sinandpunishment/tools/patchscript')
+    add_entry(z, '$REPO_ROOT/portmaster/sinandpunishment/tools/snp-patch', 'sinandpunishment/tools/snp-patch')
     add_entry(z, '$REPO_ROOT/portmaster/sinandpunishment/snprecomp.toml', 'sinandpunishment/snprecomp.toml')
     lic_dir = '$REPO_ROOT/portmaster/sinandpunishment/licenses'
     for lf in sorted(os.listdir(lic_dir)):
