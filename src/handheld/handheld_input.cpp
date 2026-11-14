@@ -28,6 +28,9 @@
 #include "snp_mouse.h"
 #include "ultramodern/ultramodern.hpp"
 
+bool snp_in_front_end_menus();
+uint32_t snp_overlay_area_rom();
+
 namespace snp::handheld {
 
 namespace {
@@ -55,6 +58,13 @@ constexpr uint16_t RUMBLE_LOW_FREQ = 0x8000;
 constexpr uint16_t RUMBLE_HIGH_FREQ = 0x8000;
 constexpr uint32_t RUMBLE_DURATION_MS = 250;
 constexpr uint32_t RETICLE_ACTIVE_TIMEOUT_MS = 150;
+constexpr uint32_t LOAD_TABLE_ADDR = 0x800597ACu;
+constexpr uint32_t LOAD_TABLE_STRIDE = 20u;
+constexpr uint32_t FIRST_PLAYABLE_STAGE_ENTRY = 4u;
+constexpr uint32_t LAST_PLAYABLE_STAGE_ENTRY = 13u;
+constexpr uint32_t PAUSE_STATE_ADDR = 0x80068A97u;
+constexpr uint8_t PAUSE_STATE_RUNNING = 1u;
+constexpr uint8_t RETICLE_MENU_CURSOR_FLAG = 0x20u;
 
 SDL_GameController* s_controller = nullptr;
 SDL_Joystick* s_joystick = nullptr;
@@ -63,6 +73,8 @@ std::thread::id s_main_thread_id;
 std::mutex s_input_mutex;
 
 std::atomic<uint32_t> s_last_gameplay_reticle_ms{0};
+std::atomic<uint32_t> s_last_menu_cursor_ms{0};
+std::atomic<const uint8_t*> s_rdram_ptr{nullptr};
 
 struct RollStateMachine {
     bool roll_button_was_pressed = false;
@@ -543,9 +555,57 @@ void update_roll_state(bool roll_requested, int aim_dx, uint16_t& buttons) {
     }
 }
 
+bool is_playable_stage_overlay(const uint8_t* rdram) {
+    if (rdram == nullptr || snp_in_front_end_menus()) {
+        return false;
+    }
+    uint32_t rom = snp_overlay_area_rom();
+    if (rom == 0) {
+        return false;
+    }
+    for (uint32_t i = FIRST_PLAYABLE_STAGE_ENTRY; i <= LAST_PLAYABLE_STAGE_ENTRY; ++i) {
+        uint32_t entry_rom = 0;
+        std::memcpy(&entry_rom, rdram + ((LOAD_TABLE_ADDR + i * LOAD_TABLE_STRIDE) & 0x1FFFFFFFu), sizeof(uint32_t));
+        if (entry_rom == rom) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_stage_combat_reticle(const uint8_t* rdram, uint8_t reticle_flags) {
+    if (!is_playable_stage_overlay(rdram)) {
+        return false;
+    }
+    if (read_rdram_byte(rdram, PAUSE_STATE_ADDR) != PAUSE_STATE_RUNNING) {
+        return false;
+    }
+    return (reticle_flags & RETICLE_MENU_CURSOR_FLAG) == 0;
+}
+
+bool is_menu_cursor_active() {
+    uint32_t last = s_last_menu_cursor_ms.load(std::memory_order_relaxed);
+    if (last == 0) {
+        return false;
+    }
+    return (SDL_GetTicks() - last) <= RETICLE_ACTIVE_TIMEOUT_MS;
+}
+
 } // namespace
 
 bool is_gameplay_reticle_active() {
+    if (snp_in_front_end_menus()) {
+        return false;
+    }
+    const uint8_t* rdram = s_rdram_ptr.load(std::memory_order_relaxed);
+    if (rdram != nullptr) {
+        if (!is_playable_stage_overlay(rdram)) {
+            return false;
+        }
+        if (read_rdram_byte(rdram, PAUSE_STATE_ADDR) != PAUSE_STATE_RUNNING) {
+            return false;
+        }
+    }
     uint32_t last = s_last_gameplay_reticle_ms.load(std::memory_order_relaxed);
     if (last == 0) {
         return false;
@@ -749,18 +809,32 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     bool in_combat = is_gameplay_reticle_active();
 
     if (!in_combat) {
-        // Automatic Menu Context (Title Screen, Options, Character Select, Cutscenes, Pause)
-        if (pad.dpad_up) { pad_buttons |= N64_DPAD_UP; stick_y = 1.0f; }
-        if (pad.dpad_down) { pad_buttons |= N64_DPAD_DOWN; stick_y = -1.0f; }
-        if (pad.dpad_left) { pad_buttons |= N64_DPAD_LEFT; stick_x = -1.0f; }
-        if (pad.dpad_right) { pad_buttons |= N64_DPAD_RIGHT; stick_x = 1.0f; }
+        // Automatic Menu Context (Title Screen, Options, File Select, Name Entry, Cutscenes, Pause)
+        if (pad.dpad_up) pad_buttons |= N64_DPAD_UP;
+        if (pad.dpad_down) pad_buttons |= N64_DPAD_DOWN;
+        if (pad.dpad_left) pad_buttons |= N64_DPAD_LEFT;
+        if (pad.dpad_right) pad_buttons |= N64_DPAD_RIGHT;
+
+        int menu_dx = (pad.dpad_right ? 1 : 0) - (pad.dpad_left ? 1 : 0);
+        int menu_dy = (pad.dpad_up ? 1 : 0) - (pad.dpad_down ? 1 : 0);
+        if (is_menu_cursor_active()) {
+            // Free-floating 2D menu cursor (Main Menu, OPT., File Select, Name Entry): smooth ramp
+            s_aim_ramp.update(menu_dx, menu_dy, stick_x, stick_y);
+        } else {
+            // Discrete list menu (In-Stage Pause, Continue): immediate full-step navigation
+            s_aim_ramp.reset();
+            stick_x = static_cast<float>(menu_dx);
+            stick_y = static_cast<float>(menu_dy);
+        }
 
         float lx = apply_axis_deadzone(pad.left_x, config.deadzone);
         float ly = apply_axis_deadzone(-pad.left_y, config.deadzone);
-        if (lx < -0.3f) { pad_buttons |= N64_DPAD_LEFT; stick_x = lx; }
-        else if (lx > 0.3f) { pad_buttons |= N64_DPAD_RIGHT; stick_x = lx; }
-        if (ly > 0.3f) { pad_buttons |= N64_DPAD_UP; stick_y = ly; }
-        else if (ly < -0.3f) { pad_buttons |= N64_DPAD_DOWN; stick_y = ly; }
+        if (std::abs(lx) > 0.01f) stick_x = std::clamp(stick_x + lx, -1.0f, 1.0f);
+        if (std::abs(ly) > 0.01f) stick_y = std::clamp(stick_y + ly, -1.0f, 1.0f);
+        if (lx < -0.5f) pad_buttons |= N64_DPAD_LEFT;
+        else if (lx > 0.5f) pad_buttons |= N64_DPAD_RIGHT;
+        if (ly > 0.5f) pad_buttons |= N64_DPAD_UP;
+        else if (ly < -0.5f) pad_buttons |= N64_DPAD_DOWN;
 
         if (pad.east_a) pad_buttons |= N64_A;
         if (pad.south_b) pad_buttons |= N64_B;
@@ -771,7 +845,6 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
         if (pad.r1) pad_buttons |= N64_R;
         if (pad.r2) pad_buttons |= N64_Z;
 
-        s_aim_ramp.reset();
         s_roll_state = {};
         s_pulse_active = false;
         s_pulse_start_tick = 0;
@@ -1019,12 +1092,20 @@ extern "C" void snp_mouse_reticle(uint8_t* rdram, uint32_t reticle) {
     if (rdram == nullptr || reticle < 0x80000000u || reticle >= 0x80800000u) {
         return;
     }
+    snp::handheld::s_rdram_ptr.store(rdram, std::memory_order_relaxed);
     if (snp::handheld::read_rdram_byte(rdram, 0x800D4F00u) != 0) {
         return;
     }
-    snp::handheld::s_last_gameplay_reticle_ms.store(SDL_GetTicks(), std::memory_order_relaxed);
 
     uint8_t reticle_flags = snp::handheld::read_rdram_byte(rdram, reticle);
+    if (!snp::handheld::is_stage_combat_reticle(rdram, reticle_flags)) {
+        snp::handheld::s_last_menu_cursor_ms.store(SDL_GetTicks(), std::memory_order_relaxed);
+        snp::handheld::s_last_gameplay_reticle_ms.store(0, std::memory_order_relaxed);
+        return;
+    }
+
+    snp::handheld::s_last_gameplay_reticle_ms.store(SDL_GetTicks(), std::memory_order_relaxed);
+
     bool is_lock_on_mode = !(reticle_flags & 0x20u) && ((reticle_flags & 0x04u) != 0);
     bool is_target_locked = is_lock_on_mode && (snp::handheld::read_rdram_byte(rdram, reticle + 2u) != 0);
 
@@ -1054,22 +1135,30 @@ extern "C" void snp_aim_stick(uint8_t* rdram, uint32_t reticle, int32_t raw_x, i
     if (rdram == nullptr || reticle < 0x80000000u || reticle >= 0x80800000u) {
         return;
     }
+    snp::handheld::s_rdram_ptr.store(rdram, std::memory_order_relaxed);
     if (snp::handheld::read_rdram_byte(rdram, 0x800D4F00u) != 0) {
         return;
     }
 
+    if (snp::config::get_option(snp::config::Option::AnalogAim)) {
+        *x = std::clamp(raw_x, -64, 64);
+        *y = std::clamp(raw_y, -64, 64);
+    }
+
     uint8_t reticle_flags = snp::handheld::read_rdram_byte(rdram, reticle);
+    if (!snp::handheld::is_stage_combat_reticle(rdram, reticle_flags)) {
+        snp::handheld::s_last_menu_cursor_ms.store(SDL_GetTicks(), std::memory_order_relaxed);
+        snp::handheld::s_last_gameplay_reticle_ms.store(0, std::memory_order_relaxed);
+        snp::handheld::s_actual_lock_on.store(false, std::memory_order_relaxed);
+        return;
+    }
+
     bool actual_lock_on = !(reticle_flags & 0x20u) && ((reticle_flags & 0x04u) != 0);
     bool target_locked = actual_lock_on && (snp::handheld::read_rdram_byte(rdram, reticle + 2u) != 0);
     bool search_busy = (reticle_flags & 0x10u) != 0;
 
     snp::handheld::s_actual_lock_on.store(actual_lock_on, std::memory_order_relaxed);
     snp::handheld::s_reticle_tick.fetch_add(1, std::memory_order_relaxed);
-
-    if (snp::config::get_option(snp::config::Option::AnalogAim)) {
-        *x = std::clamp(raw_x, -64, 64);
-        *y = std::clamp(raw_y, -64, 64);
-    }
 
     static int s_prev_flick_dx = 0;
     static int s_prev_flick_dy = 0;
