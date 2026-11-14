@@ -60,6 +60,8 @@ file(GLOB MINIZ_TEST_SOURCES CONFIGURE_DEPENDS
 
 add_executable(test_ra_client
     test_ra_client.cpp
+    ../src/gles3/gl_loader.cpp
+    ../src/handheld/handheld_overlay.cpp
     ../src/handheld/ra_credentials.cpp
     ../src/handheld/ra_offline_cache.cpp
     ../src/handheld/png_decode.cpp

@@ -112,6 +112,8 @@ bool s_gl_initialized = false;
 GLuint s_program = 0;
 GLuint s_vao = 0;
 GLuint s_vbo = 0;
+GLuint s_toast_vao = 0;
+GLuint s_toast_vbo = 0;
 GLuint s_font_texture = 0;
 GLuint s_snp_font_texture = 0;
 GLuint s_toast_badge_texture = 0;
@@ -280,21 +282,26 @@ void init_gl_resources() {
     s_loc_screen_size = gl::glGetUniformLocation(s_program, "u_screen_size");
     s_loc_texture = gl::glGetUniformLocation(s_program, "u_texture");
 
-    gl::glGenVertexArrays(1, &s_vao);
-    gl::glGenBuffers(1, &s_vbo);
+    auto init_vertex_array = [](GLuint& vao, GLuint& vbo) {
+        gl::glGenVertexArrays(1, &vao);
+        gl::glGenBuffers(1, &vbo);
 
-    gl::glBindVertexArray(s_vao);
-    gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+        gl::glBindVertexArray(vao);
+        gl::glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
-    gl::glEnableVertexAttribArray(0);
-    gl::glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(0));
-    gl::glEnableVertexAttribArray(1);
-    gl::glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(2 * sizeof(float)));
-    gl::glEnableVertexAttribArray(2);
-    gl::glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(4 * sizeof(float)));
+        gl::glEnableVertexAttribArray(0);
+        gl::glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(0));
+        gl::glEnableVertexAttribArray(1);
+        gl::glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(2 * sizeof(float)));
+        gl::glEnableVertexAttribArray(2);
+        gl::glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(OverlayVertex), reinterpret_cast<void*>(4 * sizeof(float)));
 
-    gl::glBindVertexArray(0);
-    gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
+        gl::glBindVertexArray(0);
+        gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
+    };
+
+    init_vertex_array(s_vao, s_vbo);
+    init_vertex_array(s_toast_vao, s_toast_vbo);
 
     // Build 128x64 font texture containing 95 ASCII glyphs plus a solid white pixel at (127, 63)
     std::vector<uint8_t> texels(128 * 64 * 4, 0);
@@ -695,6 +702,8 @@ void shutdown_overlay() {
             if (s_toast_badge_texture) gl::glDeleteTextures(1, &s_toast_badge_texture);
             if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
             if (s_snp_font_texture) gl::glDeleteTextures(1, &s_snp_font_texture);
+            if (s_toast_vbo) gl::glDeleteBuffers(1, &s_toast_vbo);
+            if (s_toast_vao) gl::glDeleteVertexArrays(1, &s_toast_vao);
             if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
             if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
             if (s_program) gl::glDeleteProgram(s_program);
@@ -703,6 +712,8 @@ void shutdown_overlay() {
         s_last_badge_pixels.clear();
         s_font_texture = 0;
         s_snp_font_texture = 0;
+        s_toast_vbo = 0;
+        s_toast_vao = 0;
         s_vbo = 0;
         s_vao = 0;
         s_program = 0;
@@ -785,7 +796,8 @@ void render_menu(int win_w, int win_h) {
     static std::string s_last_ra_snapshot;
     std::string ra_snapshot = ra_get_status_text() + "|" +
                               (ra_is_syncing() ? "1" : "0") + "|" +
-                              (ra_is_offline_mode() ? "1" : "0");
+                              (ra_is_offline_mode() ? "1" : "0") + "|" +
+                              std::to_string(ra_get_pending_sync_count());
     if (ra_snapshot != s_last_ra_snapshot) {
         s_last_ra_snapshot = std::move(ra_snapshot);
         s_mesh_dirty = true;
@@ -1197,14 +1209,15 @@ void render_toast_card(int win_w, int win_h) {
     gl::glActiveTexture(GL_TEXTURE0);
 
     if (!toast_vertices.empty()) {
-        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+        gl::glBindBuffer(GL_ARRAY_BUFFER, s_toast_vbo);
         gl::glBufferData(GL_ARRAY_BUFFER, toast_vertices.size() * sizeof(OverlayVertex), toast_vertices.data(), GL_STREAM_DRAW);
         gl::glBindTexture(GL_TEXTURE_2D, s_snp_font_texture);
-        gl::glBindVertexArray(s_vao);
+        gl::glBindVertexArray(s_toast_vao);
         gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(toast_vertices.size()));
     }
 
     if (!toast.rgba_pixels.empty() && !badge_vertices.empty()) {
+        bool created_badge_tex = false;
         if (s_toast_badge_texture == 0) {
             gl::glGenTextures(1, &s_toast_badge_texture);
             gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
@@ -1212,18 +1225,19 @@ void render_toast_card(int win_w, int win_h) {
             gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            created_badge_tex = true;
         } else {
             gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
         }
 
-        if (s_last_badge_pixels != toast.rgba_pixels) {
+        if (created_badge_tex || s_last_badge_pixels != toast.rgba_pixels) {
             gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, toast.rgba_pixels.data());
             s_last_badge_pixels = toast.rgba_pixels;
         }
 
-        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
+        gl::glBindBuffer(GL_ARRAY_BUFFER, s_toast_vbo);
         gl::glBufferData(GL_ARRAY_BUFFER, badge_vertices.size() * sizeof(OverlayVertex), badge_vertices.data(), GL_STREAM_DRAW);
-        gl::glBindVertexArray(s_vao);
+        gl::glBindVertexArray(s_toast_vao);
         gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(badge_vertices.size()));
     }
 

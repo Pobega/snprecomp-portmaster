@@ -24,12 +24,12 @@ host:
 
 test:
 	@if [ ! -f build-gles3-test/build.ninja ]; then \
-		$(TOOLBOX_RUN) cmake -S tests -B build-gles3-test -G Ninja -DSNP_BACKEND_GLES3=ON -DSNP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release; \
+		$(TOOLBOX_RUN) cmake -S tests -B build-gles3-test -G Ninja -DSNP_BACKEND_GLES3=ON -DSNP_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug; \
 	fi
 	$(TOOLBOX_RUN) ninja -C build-gles3-test test_gles3_renderer test_snp_patch test_ra_client
-	./build-gles3-test/test_gles3_renderer
-	./build-gles3-test/test_snp_patch
-	./build-gles3-test/test_ra_client
+	$(TOOLBOX_RUN) ./build-gles3-test/test_gles3_renderer
+	$(TOOLBOX_RUN) ./build-gles3-test/test_snp_patch
+	$(TOOLBOX_RUN) ./build-gles3-test/test_ra_client
 
 package:
 	@if [ -f build-portmaster-aarch64/SnPRecompiled ] && [ -f build-portmaster-aarch64/snp-patch ]; then \

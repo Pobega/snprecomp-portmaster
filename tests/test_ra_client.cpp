@@ -9,7 +9,10 @@
 #include <sstream>
 #include <vector>
 
+#include <SDL2/SDL.h>
+#include "gl_loader.h"
 #include "handheld_config.h"
+#include "handheld_overlay.h"
 #include "png_decode.h"
 #include "ra_client.h"
 #include "ra_credentials.h"
@@ -614,6 +617,68 @@ void test_config_roundtrip_and_partial_toml() {
     std::printf("[PASS] snprecomp.toml round-trip and partial key safety verified.\n");
 }
 
+void test_overlay_menu_persists_with_active_toast() {
+    std::printf("[TEST] Running Quick Settings menu + active toast VBO isolation test...\n");
+
+    setenv("SDL_VIDEODRIVER", "offscreen", 1);
+    assert(SDL_Init(SDL_INIT_VIDEO) == 0);
+
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+
+    constexpr int WIN_W = 720;
+    constexpr int WIN_H = 480;
+    SDL_Window* win = SDL_CreateWindow("Overlay Toast VBO Test", 0, 0, WIN_W, WIN_H,
+                                       SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+    assert(win != nullptr);
+
+    SDL_GLContext ctx = SDL_GL_CreateContext(win);
+    assert(ctx != nullptr);
+    assert(SDL_GL_MakeCurrent(win, ctx) == 0);
+    assert(snp::gles3::init_gl_loader());
+
+    auto& cfg = snp::handheld::get_mutable_config();
+    cfg.retroachievements.notifications = true;
+    setenv("SNP_RA_DEMO_TOAST_AT_FRAME", "1", 1);
+
+    snp::handheld::ra_do_frame(nullptr);
+    assert(snp::handheld::ra_has_active_toasts());
+    snp::handheld::open_overlay();
+    assert(snp::handheld::is_overlay_open());
+
+    // Frame 1: builds menu mesh (s_mesh_dirty = true -> false) AND renders toast card + 6-vertex badge
+    snp::gles3::gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    snp::gles3::gl::glViewport(0, 0, WIN_W, WIN_H);
+    snp::gles3::gl::glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    snp::gles3::gl::glClear(GL_COLOR_BUFFER_BIT);
+    snp::handheld::render_overlay(WIN_W, WIN_H);
+    assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
+
+    // Frame 2: s_mesh_dirty is false; menu VBO must NOT have been overwritten by toast badge vertices
+    snp::gles3::gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    snp::gles3::gl::glViewport(0, 0, WIN_W, WIN_H);
+    snp::gles3::gl::glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    snp::gles3::gl::glClear(GL_COLOR_BUFFER_BIT);
+    snp::handheld::render_overlay(WIN_W, WIN_H);
+    assert(snp::gles3::gl::glGetError() == GL_NO_ERROR);
+
+    uint8_t panel_px[4]{};
+    // OpenGL origin is bottom-left; (55, 440) -> screen (55, 40), empty dark top-left interior of Quick Settings panel
+    snp::gles3::gl::glReadPixels(55, 440, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, panel_px);
+    assert(panel_px[1] < 50 && panel_px[2] > 15); // Dark navy panel bg over green clear, NOT (0, 255, 0)
+
+    snp::handheld::close_overlay();
+    snp::handheld::shutdown_overlay();
+    unsetenv("SNP_RA_DEMO_TOAST_AT_FRAME");
+
+    SDL_GL_DeleteContext(ctx);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+
+    std::printf("[PASS] Quick Settings menu + active toast VBO isolation verified.\n");
+}
+
 } // namespace
 
 int main() {
@@ -631,9 +696,10 @@ int main() {
     test_startsession_merge_with_offline_unlocks();
     test_pending_unlock_queue_and_sync();
     test_config_roundtrip_and_partial_toml();
+    test_overlay_menu_persists_with_active_toast();
 
     std::printf("========================================\n");
-    std::printf("All 10 test suites passed successfully!\n");
+    std::printf("All 11 test suites passed successfully!\n");
     std::printf("========================================\n");
     return 0;
 }

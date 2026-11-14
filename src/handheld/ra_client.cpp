@@ -711,17 +711,23 @@ void on_game_load_completed(int result, const char* error_message, rc_client_t* 
             }
         }
 
-        std::string sub_header = s_is_offline_mode.load()
-            ? "RetroAchievements - Offline (Cached)"
-            : "RetroAchievements - Softcore";
+        std::string header = s_is_offline_mode.load()
+            ? "RA - OFFLINE MODE"
+            : "RETROACHIEVEMENTS";
+        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
+        std::string sub_line = (s_is_offline_mode.load() ? "Offline: " : "Logged in: ") + user_label;
+        std::string mode_suffix = s_is_offline_mode.load() ? " - Cached" : " - Softcore";
         std::string detail = std::to_string(s_unlocked_achievements) + "/" +
                              std::to_string(s_total_achievements) + " Unlocked (" +
                              std::to_string(summary.points_unlocked) + "/" +
-                             std::to_string(summary.points_available) + " pts)";
-        push_toast(sub_header, s_game_title, detail,
-                   get_cached_badge_or_trophy(badge_name), DEFAULT_TOAST_DURATION, 1);
+                             std::to_string(summary.points_available) + " pts)" + mode_suffix;
+        push_toast(header, sub_line, detail,
+                   get_cached_badge_or_trophy(badge_name), 5.0f, 1);
     } else {
         s_state.store(RaClientState::LoggedIn);
+        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
+        push_toast("RETROACHIEVEMENTS", "Logged in: " + user_label,
+                   "Softcore mode active", {}, 5.0f, 1);
         std::fprintf(stderr, "[RA] Game identification failed: %s\n", error_message ? error_message : "Unknown");
     }
 }
@@ -735,6 +741,9 @@ void trigger_game_load(rc_client_t* client) {
                                                on_game_load_completed, nullptr);
     } else {
         s_state.store(RaClientState::LoggedIn);
+        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
+        push_toast("RETROACHIEVEMENTS", "Logged in: " + user_label,
+                   "Softcore mode active", {}, 5.0f, 1);
     }
 }
 
@@ -1002,9 +1011,16 @@ void ra_do_frame(uint8_t* rdram) {
         dt = 1.0f / 60.0f;
     }
 
+    constexpr uint64_t STARTUP_TOAST_HOLD_FRAMES = 60;
+    constexpr float TOAST_SLIDE_IN_HOLD_SEC = 0.35f;
+
     std::lock_guard<std::mutex> lock(s_toast_mutex);
     if (!s_toast_queue.empty()) {
         s_toast_queue.front().elapsed_sec += dt;
+        if (rdram != nullptr && s_frame_counter < STARTUP_TOAST_HOLD_FRAMES &&
+            s_toast_queue.front().elapsed_sec > TOAST_SLIDE_IN_HOLD_SEC) {
+            s_toast_queue.front().elapsed_sec = TOAST_SLIDE_IN_HOLD_SEC;
+        }
         if (s_toast_queue.front().elapsed_sec >= s_toast_queue.front().duration_sec) {
             s_toast_queue.pop_front();
         }
