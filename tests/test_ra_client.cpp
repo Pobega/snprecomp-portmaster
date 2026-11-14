@@ -191,6 +191,16 @@ void test_nextui_credentials_parsing_and_discovery() {
         assert(creds.has_login());
     }
 
+    // Case 4: Empty token with raPassword and raServerUsername (renamed account password fallback)
+    {
+        std::istringstream stream("raUsername=SerPbone\nraServerUsername=pobega\nraToken=\nraPassword=pass789\n");
+        auto creds = snp::handheld::parse_nextui_ra_settings(stream);
+        assert(creds.username == "pobega");
+        assert(creds.token.empty());
+        assert(creds.password == "pass789");
+        assert(creds.has_login());
+    }
+
     // Directory discovery: walk up ancestor directories
     {
         std::filesystem::path root_temp = std::filesystem::current_path() / "build_test_ra_tmp";
@@ -617,6 +627,93 @@ void test_config_roundtrip_and_partial_toml() {
     std::printf("[PASS] snprecomp.toml round-trip and partial key safety verified.\n");
 }
 
+void test_renamed_account_login_and_session_flow() {
+    std::printf("[TEST] Running renamed account login and session flow...\n");
+
+    std::filesystem::path test_dir = std::filesystem::current_path() / "build_test_ra_renamed_tmp";
+    std::error_code ec;
+    std::filesystem::remove_all(test_dir, ec);
+    std::filesystem::create_directories(test_dir, ec);
+
+    // 1. Online login response with login username "pobega" and display username "SerPbone"
+    std::string post_data = "r=login2&u=pobega&t=tok";
+    std::string response_body = "{\"Success\":true,\"User\":\"SerPbone\",\"Token\":\"tok123\"}";
+    bool cache_ok = snp::handheld::cache_online_response(post_data, response_body, test_dir);
+    assert(cache_ok);
+
+    std::filesystem::path login_pobega = test_dir / "login_pobega.json";
+    std::filesystem::path login_serpbone = test_dir / "login_serpbone.json";
+
+    assert(std::filesystem::exists(login_pobega));
+    assert(std::filesystem::exists(login_serpbone));
+
+    auto perms_pobega = std::filesystem::status(login_pobega).permissions();
+    assert((perms_pobega & std::filesystem::perms::owner_read) != std::filesystem::perms::none);
+    assert((perms_pobega & std::filesystem::perms::owner_write) != std::filesystem::perms::none);
+
+    auto perms_serpbone = std::filesystem::status(login_serpbone).permissions();
+    assert((perms_serpbone & std::filesystem::perms::owner_read) != std::filesystem::perms::none);
+    assert((perms_serpbone & std::filesystem::perms::owner_write) != std::filesystem::perms::none);
+
+    // Verify try_serve_offline_response serves "User":"SerPbone" for both u=pobega and u=SerPbone
+    std::string body_pobega;
+    int status_pobega = 0;
+    bool serve_pobega = snp::handheld::try_serve_offline_response("r=login2&u=pobega", body_pobega, status_pobega, test_dir);
+    assert(serve_pobega);
+    assert(body_pobega.find("\"User\":\"SerPbone\"") != std::string::npos);
+
+    std::string body_serpbone;
+    int status_serpbone = 0;
+    bool serve_serpbone = snp::handheld::try_serve_offline_response("r=login2&u=SerPbone", body_serpbone, status_serpbone, test_dir);
+    assert(serve_serpbone);
+    assert(body_serpbone.find("\"User\":\"SerPbone\"") != std::string::npos);
+
+    // 2. Chained session flow
+    std::string start_post = "r=startsession&u=SerPbone&g=10157";
+    std::string start_body = "{\"Success\":true,\"Unlocks\":[],\"HardcoreUnlocks\":[],\"ServerNow\":1700050000}";
+    bool start_ok = snp::handheld::cache_online_response(start_post, start_body, test_dir);
+    assert(start_ok);
+
+    std::filesystem::path start_file = test_dir / "startsession_serpbone_10157.json";
+    assert(std::filesystem::exists(start_file));
+
+    // Queue a PendingUnlock for "SerPbone"
+    snp::handheld::PendingUnlock p;
+    p.username = "SerPbone";
+    p.game_id = 10157;
+    p.achievement_id = 42;
+    p.game_hash = "abcdef";
+    p.unlock_epoch_sec = 1700000000ULL;
+    bool q_ok = snp::handheld::queue_pending_unlock(p, test_dir);
+    assert(q_ok);
+
+    // try_serve_offline_response merges the queued unlock into startsession response
+    std::string merged_body;
+    int merged_status = 0;
+    bool serve_start = snp::handheld::try_serve_offline_response(start_post, merged_body, merged_status, test_dir);
+    assert(serve_start);
+    assert(merged_body.find("\"ID\":42") != std::string::npos ||
+           merged_body.find("\"ID\": 42") != std::string::npos);
+
+    // Record synced unlocks to startsession
+    bool record_ok = snp::handheld::record_synced_unlocks_to_startsession("SerPbone", 10157, {42}, test_dir);
+    assert(record_ok);
+
+    // Remove pending unlock from queue and verify persisted startsession contains achievement 42
+    bool rem_ok = snp::handheld::remove_pending_unlocks({42}, "SerPbone", 10157, test_dir);
+    assert(rem_ok);
+    assert(snp::handheld::get_pending_unlock_count(test_dir) == 0);
+
+    std::string final_body;
+    int final_status = 0;
+    bool final_serve = snp::handheld::try_serve_offline_response(start_post, final_body, final_status, test_dir);
+    assert(final_serve);
+    assert(final_body.find("42") != std::string::npos);
+
+    std::filesystem::remove_all(test_dir, ec);
+    std::printf("[PASS] Renamed account login and session flow verified.\n");
+}
+
 void test_overlay_menu_persists_with_active_toast() {
     std::printf("[TEST] Running Quick Settings menu + active toast VBO isolation test...\n");
 
@@ -696,10 +793,11 @@ int main() {
     test_startsession_merge_with_offline_unlocks();
     test_pending_unlock_queue_and_sync();
     test_config_roundtrip_and_partial_toml();
+    test_renamed_account_login_and_session_flow();
     test_overlay_menu_persists_with_active_toast();
 
     std::printf("========================================\n");
-    std::printf("All 11 test suites passed successfully!\n");
+    std::printf("All 12 test suites passed successfully!\n");
     std::printf("========================================\n");
     return 0;
 }
