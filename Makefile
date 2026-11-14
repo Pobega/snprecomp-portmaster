@@ -1,4 +1,4 @@
-ADB ?= adb
+ADB ?= $(shell command -v adb 2>/dev/null || echo $(HOME)/.local/bin/adb)
 JOBS ?= $(shell nproc)
 
 # NextUI (PORTS.pak) SD card layout (TrimUI Brick / Smart Pro, RGSP / H700, etc.)
@@ -36,10 +36,7 @@ package:
 		bash tools/build-portmaster-aarch64.sh; \
 	fi
 
-push:
-	@if [ ! -f "$(STAGE_DIR)/Sin and Punishment.sh" ] || [ ! -f "$(STAGE_DIR)/sinandpunishment/snprecompiled.aarch64" ]; then \
-		bash tools/build-portmaster-aarch64.sh; \
-	fi
+push: build
 	@$(ADB) get-state >/dev/null
 	@echo "==> Pushing Sin and Punishment.sh to Ports directories..."
 	$(ADB) push "$(STAGE_DIR)/Sin and Punishment.sh" "$(NEXTUI_PORTS_DIR)/Sin and Punishment.sh"

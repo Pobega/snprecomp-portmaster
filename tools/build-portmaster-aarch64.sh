@@ -115,10 +115,6 @@ RUN dpkg --add-architecture arm64 && \
 EOF
     fi
 
-    # Compile native host file_to_c for CrossCompile.cmake import
-    mkdir -p "$REPO_ROOT/build-host-focal"
-    gcc -O2 "$REPO_ROOT/tools/file_to_c.c" -o "$REPO_ROOT/build-host-focal/file_to_c"
-
     echo "--> Running cross-compilation in $IMAGE_TAG..."
     # SELinux guardrail: NEVER use :Z with $HOME / $REPO_ROOT; use --security-opt label=disable
     $PODMAN_CMD run --rm \
@@ -128,6 +124,10 @@ EOF
         "$IMAGE_TAG" \
         bash -c '
 set -euo pipefail
+mkdir -p build-host-focal
+if [ ! -x build-host-focal/file_to_c ]; then
+    gcc -O2 tools/file_to_c.c -o build-host-focal/file_to_c
+fi
 BUILD_DIR="build-portmaster-aarch64"
 mkdir -p "$BUILD_DIR"
 export PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"

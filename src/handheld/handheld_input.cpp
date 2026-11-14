@@ -56,7 +56,7 @@ constexpr uint32_t LOAD_TABLE_STRIDE = 20u;
 constexpr uint32_t FIRST_PLAYABLE_STAGE_ENTRY = 4u;
 constexpr uint32_t LAST_PLAYABLE_STAGE_ENTRY = 13u;
 constexpr uint32_t PAUSE_STATE_ADDR = 0x80068A97u;
-constexpr uint8_t PAUSE_STATE_RUNNING = 1u;
+constexpr uint8_t PAUSE_STATE_UNPAUSED = 0u;
 constexpr uint8_t RETICLE_MENU_CURSOR_FLAG = 0x20u;
 
 SDL_GameController* s_controller = nullptr;
@@ -246,6 +246,11 @@ void open_primary_controller() {
                 s_joystick = SDL_GameControllerGetJoystick(s_controller);
                 std::fprintf(stderr, "[INPUT] Successfully opened primary SDL_GameController: \"%s\"\n",
                              SDL_GameControllerName(s_controller));
+                char* mapping = SDL_GameControllerMapping(s_controller);
+                if (mapping != nullptr) {
+                    std::fprintf(stderr, "[INPUT] Active mapping: %s\n", mapping);
+                    SDL_free(mapping);
+                }
                 break;
             }
         }
@@ -376,8 +381,11 @@ PhysicalPadState read_physical_pad_state() {
         }
     }
 
-    // Keyboard support
-    const uint8_t* keyboard = SDL_GetKeyboardState(nullptr);
+    // Only poll keyboard state when no controller is open or when running windowed on desktop,
+    // preventing handheld key-synthesis shims from overriding physical gamepad buttons.
+    bool poll_keyboard = (s_controller == nullptr && s_joystick == nullptr) ||
+                         (std::getenv("SNP_WINDOWED") != nullptr);
+    const uint8_t* keyboard = poll_keyboard ? SDL_GetKeyboardState(nullptr) : nullptr;
     if (keyboard != nullptr) {
         if (keyboard[SDL_SCANCODE_UP] || keyboard[SDL_SCANCODE_W]) pad.dpad_up = true;
         if (keyboard[SDL_SCANCODE_DOWN] || keyboard[SDL_SCANCODE_S]) pad.dpad_down = true;
@@ -457,11 +465,12 @@ bool is_playable_stage_overlay(const uint8_t* rdram) {
     return false;
 }
 
+bool is_stage_unpaused(const uint8_t* rdram) {
+    return read_rdram_byte(rdram, PAUSE_STATE_ADDR) == PAUSE_STATE_UNPAUSED;
+}
+
 bool is_stage_combat_reticle(const uint8_t* rdram, uint8_t reticle_flags) {
-    if (!is_playable_stage_overlay(rdram)) {
-        return false;
-    }
-    if (read_rdram_byte(rdram, PAUSE_STATE_ADDR) != PAUSE_STATE_RUNNING) {
+    if (!is_playable_stage_overlay(rdram) || !is_stage_unpaused(rdram)) {
         return false;
     }
     return (reticle_flags & RETICLE_MENU_CURSOR_FLAG) == 0;
@@ -483,10 +492,7 @@ bool is_gameplay_reticle_active() {
     }
     const uint8_t* rdram = s_rdram_ptr.load(std::memory_order_relaxed);
     if (rdram != nullptr) {
-        if (!is_playable_stage_overlay(rdram)) {
-            return false;
-        }
-        if (read_rdram_byte(rdram, PAUSE_STATE_ADDR) != PAUSE_STATE_RUNNING) {
+        if (!is_playable_stage_overlay(rdram) || !is_stage_unpaused(rdram)) {
             return false;
         }
     }

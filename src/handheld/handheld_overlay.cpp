@@ -562,10 +562,12 @@ void init_overlay() {
 void shutdown_overlay() {
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
     if (s_gl_initialized) {
-        if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
-        if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
-        if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
-        if (s_program) gl::glDeleteProgram(s_program);
+        if (SDL_GL_GetCurrentContext() != nullptr) {
+            if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
+            if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
+            if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
+            if (s_program) gl::glDeleteProgram(s_program);
+        }
         s_font_texture = 0;
         s_vbo = 0;
         s_vao = 0;

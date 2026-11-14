@@ -5109,10 +5109,10 @@ index 0000000..696d62d
 +} // namespace snp::handheld
 diff --git a/src/handheld/handheld_input.cpp b/src/handheld/handheld_input.cpp
 new file mode 100644
-index 0000000..9300909
+index 0000000..db273c5
 --- /dev/null
 +++ b/src/handheld/handheld_input.cpp
-@@ -0,0 +1,1145 @@
+@@ -0,0 +1,1151 @@
 +#include "handheld_input.h"
 +
 +#include <algorithm>
@@ -5171,7 +5171,7 @@ index 0000000..9300909
 +constexpr uint32_t FIRST_PLAYABLE_STAGE_ENTRY = 4u;
 +constexpr uint32_t LAST_PLAYABLE_STAGE_ENTRY = 13u;
 +constexpr uint32_t PAUSE_STATE_ADDR = 0x80068A97u;
-+constexpr uint8_t PAUSE_STATE_RUNNING = 1u;
++constexpr uint8_t PAUSE_STATE_UNPAUSED = 0u;
 +constexpr uint8_t RETICLE_MENU_CURSOR_FLAG = 0x20u;
 +
 +SDL_GameController* s_controller = nullptr;
@@ -5361,6 +5361,11 @@ index 0000000..9300909
 +                s_joystick = SDL_GameControllerGetJoystick(s_controller);
 +                std::fprintf(stderr, "[INPUT] Successfully opened primary SDL_GameController: \"%s\"\n",
 +                             SDL_GameControllerName(s_controller));
++                char* mapping = SDL_GameControllerMapping(s_controller);
++                if (mapping != nullptr) {
++                    std::fprintf(stderr, "[INPUT] Active mapping: %s\n", mapping);
++                    SDL_free(mapping);
++                }
 +                break;
 +            }
 +        }
@@ -5491,8 +5496,11 @@ index 0000000..9300909
 +        }
 +    }
 +
-+    // Keyboard support
-+    const uint8_t* keyboard = SDL_GetKeyboardState(nullptr);
++    // Only poll keyboard state when no controller is open or when running windowed on desktop,
++    // preventing handheld key-synthesis shims from overriding physical gamepad buttons.
++    bool poll_keyboard = (s_controller == nullptr && s_joystick == nullptr) ||
++                         (std::getenv("SNP_WINDOWED") != nullptr);
++    const uint8_t* keyboard = poll_keyboard ? SDL_GetKeyboardState(nullptr) : nullptr;
 +    if (keyboard != nullptr) {
 +        if (keyboard[SDL_SCANCODE_UP] || keyboard[SDL_SCANCODE_W]) pad.dpad_up = true;
 +        if (keyboard[SDL_SCANCODE_DOWN] || keyboard[SDL_SCANCODE_S]) pad.dpad_down = true;
@@ -5572,11 +5580,12 @@ index 0000000..9300909
 +    return false;
 +}
 +
++bool is_stage_unpaused(const uint8_t* rdram) {
++    return read_rdram_byte(rdram, PAUSE_STATE_ADDR) == PAUSE_STATE_UNPAUSED;
++}
++
 +bool is_stage_combat_reticle(const uint8_t* rdram, uint8_t reticle_flags) {
-+    if (!is_playable_stage_overlay(rdram)) {
-+        return false;
-+    }
-+    if (read_rdram_byte(rdram, PAUSE_STATE_ADDR) != PAUSE_STATE_RUNNING) {
++    if (!is_playable_stage_overlay(rdram) || !is_stage_unpaused(rdram)) {
 +        return false;
 +    }
 +    return (reticle_flags & RETICLE_MENU_CURSOR_FLAG) == 0;
@@ -5598,10 +5607,7 @@ index 0000000..9300909
 +    }
 +    const uint8_t* rdram = s_rdram_ptr.load(std::memory_order_relaxed);
 +    if (rdram != nullptr) {
-+        if (!is_playable_stage_overlay(rdram)) {
-+            return false;
-+        }
-+        if (read_rdram_byte(rdram, PAUSE_STATE_ADDR) != PAUSE_STATE_RUNNING) {
++        if (!is_playable_stage_overlay(rdram) || !is_stage_unpaused(rdram)) {
 +            return false;
 +        }
 +    }
@@ -6746,10 +6752,10 @@ index 0000000..af751e7
 +}
 diff --git a/src/handheld/handheld_overlay.cpp b/src/handheld/handheld_overlay.cpp
 new file mode 100644
-index 0000000..1ec015c
+index 0000000..d6a80f8
 --- /dev/null
 +++ b/src/handheld/handheld_overlay.cpp
-@@ -0,0 +1,710 @@
+@@ -0,0 +1,712 @@
 +#include "handheld_overlay.h"
 +
 +#include <algorithm>
@@ -7314,10 +7320,12 @@ index 0000000..1ec015c
 +void shutdown_overlay() {
 +    std::lock_guard<std::mutex> lock(s_overlay_mutex);
 +    if (s_gl_initialized) {
-+        if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
-+        if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
-+        if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
-+        if (s_program) gl::glDeleteProgram(s_program);
++        if (SDL_GL_GetCurrentContext() != nullptr) {
++            if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
++            if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
++            if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
++            if (s_program) gl::glDeleteProgram(s_program);
++        }
 +        s_font_texture = 0;
 +        s_vbo = 0;
 +        s_vao = 0;
