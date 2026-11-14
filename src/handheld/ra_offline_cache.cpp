@@ -83,6 +83,37 @@ std::vector<PendingUnlock> load_pending_unlocks_unlocked(const std::filesystem::
     return list;
 }
 
+bool write_atomic_cache_file(const std::filesystem::path& target_file,
+                            const std::string& response_body,
+                            bool owner_only_perms) {
+    std::error_code ec;
+    std::filesystem::path parent = target_file.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+    }
+
+    std::filesystem::path tmp_file = target_file;
+    tmp_file += ".tmp";
+
+    std::ofstream out(tmp_file, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) return false;
+
+    if (owner_only_perms) {
+        std::filesystem::permissions(tmp_file,
+            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+            std::filesystem::perm_options::replace, ec);
+    }
+    out.write(response_body.data(), static_cast<std::streamsize>(response_body.size()));
+    out.close();
+
+    std::filesystem::rename(tmp_file, target_file, ec);
+    if (ec) {
+        std::filesystem::remove(tmp_file, ec);
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 std::string url_decode(const std::string& in) {
@@ -159,15 +190,33 @@ bool cache_online_response(const std::string& post_data, const std::string& resp
     std::string r = params["r"];
     if (r.empty()) return false;
 
-    std::filesystem::path target_file;
-    bool is_login = false;
-
     if (r == "login2") {
         std::string u = params["u"];
         if (u.empty()) return false;
-        target_file = cache_dir / ("login_" + sanitize_user_key(u) + ".json");
-        is_login = true;
-    } else if (r == "gameid") {
+        std::filesystem::path primary_file = cache_dir / ("login_" + sanitize_user_key(u) + ".json");
+        bool primary_ok = write_atomic_cache_file(primary_file, response_body, true);
+
+        rc_api_server_response_t server_resp{};
+        server_resp.body = response_body.data();
+        server_resp.body_length = response_body.size();
+        server_resp.http_status_code = 200;
+
+        rc_api_login_response_t login_resp{};
+        int res = rc_api_process_login_server_response(&login_resp, &server_resp);
+        if (res == RC_OK && login_resp.response.succeeded &&
+            login_resp.username != nullptr && login_resp.username[0] != '\0') {
+            std::string server_user_key = sanitize_user_key(login_resp.username);
+            if (server_user_key != sanitize_user_key(u)) {
+                std::filesystem::path server_file = cache_dir / ("login_" + server_user_key + ".json");
+                write_atomic_cache_file(server_file, response_body, true);
+            }
+        }
+        rc_api_destroy_login_response(&login_resp);
+        return primary_ok;
+    }
+
+    std::filesystem::path target_file;
+    if (r == "gameid") {
         std::string m = params["m"];
         if (m.empty()) return false;
         target_file = cache_dir / ("gameid_" + sanitize_filename(m) + ".json");
@@ -194,29 +243,7 @@ bool cache_online_response(const std::string& post_data, const std::string& resp
         return false;
     }
 
-    std::error_code ec;
-    std::filesystem::create_directories(cache_dir, ec);
-
-    std::filesystem::path tmp_file = target_file;
-    tmp_file += ".tmp";
-
-    std::ofstream out(tmp_file, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) return false;
-    if (is_login) {
-        std::filesystem::permissions(tmp_file,
-            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-            std::filesystem::perm_options::replace, ec);
-    }
-    out.write(response_body.data(), response_body.size());
-    out.close();
-
-    std::filesystem::rename(tmp_file, target_file, ec);
-    if (ec) {
-        std::filesystem::remove(tmp_file, ec);
-        return false;
-    }
-
-    return true;
+    return write_atomic_cache_file(target_file, response_body, false);
 }
 
 bool try_serve_offline_response(const std::string& post_data, std::string& out_body, int& out_status,
@@ -458,10 +485,7 @@ bool record_synced_unlocks_to_startsession(const std::string& username, uint32_t
     }
 
     std::string merged = merge_start_session_unlocks(content, dummy_pending);
-    std::ofstream out(target_file, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) return false;
-    out.write(merged.data(), merged.size());
-    return true;
+    return write_atomic_cache_file(target_file, merged, false);
 }
 
 } // namespace snp::handheld

@@ -55,7 +55,8 @@ std::atomic<bool> s_is_offline_mode{false};
 std::atomic<bool> s_is_syncing{false};
 std::atomic<uint64_t> s_last_real_ping_time{0};
 
-std::string s_current_username;
+std::string s_login_username;
+std::string s_display_username;
 std::string s_current_token;
 std::string s_discovered_password;
 std::string s_game_title;
@@ -312,20 +313,28 @@ void perform_sync_job() {
         token = s_current_token;
     }
     if (token.empty()) {
-        std::string user = !s_current_username.empty() ? s_current_username : get_config().retroachievements.username;
-        std::string login_body;
-        int login_status = 0;
-        if (!user.empty() && try_serve_offline_response("r=login2&u=" + user, login_body, login_status)) {
-            rc_api_login_response_t login_resp{};
-            rc_api_server_response_t server_resp{};
-            server_resp.body = login_body.c_str();
-            server_resp.body_length = login_body.size();
-            server_resp.http_status_code = login_status;
-            if (rc_api_process_login_server_response(&login_resp, &server_resp) == RC_OK &&
-                login_resp.response.succeeded && login_resp.api_token) {
-                token = login_resp.api_token;
+        const std::string candidate_users[] = {
+            s_login_username,
+            get_config().retroachievements.username,
+            s_display_username
+        };
+        for (const auto& user : candidate_users) {
+            if (user.empty()) continue;
+            std::string login_body;
+            int login_status = 0;
+            if (try_serve_offline_response("r=login2&u=" + user, login_body, login_status)) {
+                rc_api_login_response_t login_resp{};
+                rc_api_server_response_t server_resp{};
+                server_resp.body = login_body.c_str();
+                server_resp.body_length = login_body.size();
+                server_resp.http_status_code = login_status;
+                if (rc_api_process_login_server_response(&login_resp, &server_resp) == RC_OK &&
+                    login_resp.response.succeeded && login_resp.api_token) {
+                    token = login_resp.api_token;
+                }
+                rc_api_destroy_login_response(&login_resp);
+                if (!token.empty()) break;
             }
-            rc_api_destroy_login_response(&login_resp);
         }
     }
 
@@ -397,7 +406,9 @@ void perform_sync_job() {
         }
     } else {
         if (s_is_offline_mode.load()) {
-            std::string user = !s_current_username.empty() ? s_current_username : get_config().retroachievements.username;
+            std::string user = !s_login_username.empty() ? s_login_username :
+                               (!get_config().retroachievements.username.empty() ?
+                                get_config().retroachievements.username : s_display_username);
             rc_api_login_request_t req{};
             req.username = user.c_str();
             req.api_token = token.c_str();
@@ -415,7 +426,9 @@ void perform_sync_job() {
                 }
 
                 if (item.http_status_code == 200 &&
-                    item.body.find("\"Success\":true") != std::string::npos) {
+                    (item.body.find("\"Success\":true") != std::string::npos ||
+                     item.body.find("\"Success\": true") != std::string::npos)) {
+                    cache_online_response(task.post_data, item.body);
                     s_is_offline_mode.store(false);
                     push_toast("RetroAchievements Online", "Reconnected",
                                "Up to date", {}, 3.5f, 1);
@@ -516,7 +529,7 @@ void http_worker_thread_func() {
                 } else if (item.http_status_code <= 0) {
                     s_is_offline_mode.store(true);
                     PendingUnlock p;
-                    p.username = !params["u"].empty() ? params["u"] : s_current_username;
+                    p.username = !params["u"].empty() ? params["u"] : s_display_username;
                     p.game_id = s_current_game_id;
                     try {
                         p.achievement_id = static_cast<uint32_t>(std::stoul(params["a"]));
@@ -714,7 +727,7 @@ void on_game_load_completed(int result, const char* error_message, rc_client_t* 
         std::string header = s_is_offline_mode.load()
             ? "RA - OFFLINE MODE"
             : "RETROACHIEVEMENTS";
-        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
+        std::string user_label = s_display_username.empty() ? "Player" : s_display_username;
         std::string sub_line = (s_is_offline_mode.load() ? "Offline: " : "Logged in: ") + user_label;
         std::string mode_suffix = s_is_offline_mode.load() ? " - Cached" : " - Softcore";
         std::string detail = std::to_string(s_unlocked_achievements) + "/" +
@@ -725,7 +738,7 @@ void on_game_load_completed(int result, const char* error_message, rc_client_t* 
                    get_cached_badge_or_trophy(badge_name), 5.0f, 1);
     } else {
         s_state.store(RaClientState::LoggedIn);
-        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
+        std::string user_label = s_display_username.empty() ? "Player" : s_display_username;
         push_toast("RETROACHIEVEMENTS", "Logged in: " + user_label,
                    "Softcore mode active", {}, 5.0f, 1);
         std::fprintf(stderr, "[RA] Game identification failed: %s\n", error_message ? error_message : "Unknown");
@@ -741,7 +754,7 @@ void trigger_game_load(rc_client_t* client) {
                                                on_game_load_completed, nullptr);
     } else {
         s_state.store(RaClientState::LoggedIn);
-        std::string user_label = s_current_username.empty() ? "Player" : s_current_username;
+        std::string user_label = s_display_username.empty() ? "Player" : s_display_username;
         push_toast("RETROACHIEVEMENTS", "Logged in: " + user_label,
                    "Softcore mode active", {}, 5.0f, 1);
     }
@@ -756,9 +769,9 @@ void on_login_token_completed(int result, const char* error_message, rc_client_t
         const rc_client_user_t* user = rc_client_get_user_info(client);
         if (user) {
             if (user->display_name) {
-                s_current_username = user->display_name;
+                s_display_username = user->display_name;
             } else if (user->username) {
-                s_current_username = user->username;
+                s_display_username = user->username;
             }
             if (user->token) {
                 s_current_token = user->token;
@@ -767,7 +780,7 @@ void on_login_token_completed(int result, const char* error_message, rc_client_t
         trigger_game_load(client);
     } else {
         if (!s_discovered_password.empty()) {
-            rc_client_begin_login_with_password(client, s_current_username.c_str(),
+            rc_client_begin_login_with_password(client, s_login_username.c_str(),
                                                 s_discovered_password.c_str(),
                                                 on_login_password_completed, nullptr);
         } else {
@@ -788,14 +801,14 @@ void on_login_password_completed(int result, const char* error_message, rc_clien
         const rc_client_user_t* user = rc_client_get_user_info(client);
         if (user) {
             if (user->display_name) {
-                s_current_username = user->display_name;
+                s_display_username = user->display_name;
             } else if (user->username) {
-                s_current_username = user->username;
+                s_display_username = user->username;
             }
             if (user->token) {
                 s_current_token = user->token;
                 auto& cfg = get_mutable_config().retroachievements;
-                cfg.username = s_current_username;
+                cfg.username = s_login_username;
                 cfg.token = user->token;
                 cfg.password.clear();
                 save_config();
@@ -825,7 +838,8 @@ void trigger_login(rc_client_t* client) {
         return;
     }
 
-    s_current_username = creds.username;
+    s_login_username = creds.username;
+    s_display_username = creds.username;
     s_discovered_password = creds.password;
     if (!creds.token.empty()) {
         s_current_token = creds.token;
@@ -833,10 +847,10 @@ void trigger_login(rc_client_t* client) {
 
     s_state.store(RaClientState::LoggingIn);
     if (!creds.token.empty()) {
-        rc_client_begin_login_with_token(client, creds.username.c_str(), creds.token.c_str(),
+        rc_client_begin_login_with_token(client, s_login_username.c_str(), creds.token.c_str(),
                                          on_login_token_completed, nullptr);
     } else if (!creds.password.empty()) {
-        rc_client_begin_login_with_password(client, creds.username.c_str(), creds.password.c_str(),
+        rc_client_begin_login_with_password(client, s_login_username.c_str(), creds.password.c_str(),
                                             on_login_password_completed, nullptr);
     }
 }
@@ -1078,10 +1092,10 @@ std::string ra_get_status_text() {
                    std::to_string(s_total_achievements) + ")";
         }
         if (pending > 0) {
-            return s_current_username + " (" + std::to_string(s_unlocked_achievements) + "/" +
+            return s_display_username + " (" + std::to_string(s_unlocked_achievements) + "/" +
                    std::to_string(s_total_achievements) + " - " + std::to_string(pending) + " queued)";
         }
-        return s_current_username + " (" + std::to_string(s_unlocked_achievements) + "/" +
+        return s_display_username + " (" + std::to_string(s_unlocked_achievements) + "/" +
                std::to_string(s_total_achievements) + ")";
     }
     }

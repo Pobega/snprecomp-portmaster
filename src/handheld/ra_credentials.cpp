@@ -114,7 +114,7 @@ RaCredentials parse_nextui_ra_settings(std::istream& is) {
         result.token = raw_token;
         result.password = raw_password;
     } else if (!raw_password.empty()) {
-        result.username = raw_username;
+        result.username = !raw_server_username.empty() ? raw_server_username : raw_username;
         result.token = "";
         result.password = raw_password;
     }
