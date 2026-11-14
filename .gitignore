@@ -94,6 +94,7 @@ snp-interp-log
 
 # PortMaster & handheld artifacts
 portmaster/sinandpunishment/SnPRecompiled
+portmaster/sinandpunishment/snprecompiled.*
 portmaster/sinandpunishment/log.txt
 portmaster/sinandpunishment/roms/*.z64
 portmaster/sinandpunishment/roms/*.n64

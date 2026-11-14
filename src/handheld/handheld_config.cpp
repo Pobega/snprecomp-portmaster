@@ -27,6 +27,24 @@ HandheldConfig& get_mutable_config() {
     return g_config;
 }
 
+std::string resolve_default_control_scheme() {
+    const char* env_sticks = std::getenv("ANALOG_STICKS");
+    if (!env_sticks || env_sticks[0] == '\0') {
+        env_sticks = std::getenv("SNP_ANALOG_STICKS");
+    }
+    if (env_sticks) {
+        try {
+            int sticks = std::stoi(env_sticks);
+            if (sticks >= 2) {
+                return CONTROL_SCHEME_TWIN_STICK;
+            }
+        } catch (...) {
+            // Unparseable stick count; default to stickless layout.
+        }
+    }
+    return CONTROL_SCHEME_DPAD_STRAFE_SHIFT;
+}
+
 void apply_graphics_config() {
     snp::gles3::set_vsync_enabled(g_config.video.vsync);
 
@@ -54,12 +72,11 @@ void save_config(const std::string& config_path) {
         return;
     }
 
-    out << "# Sin and Punishment Recompiled - Handheld Configuration\n"
-        << "# Tuned for Anbernic RG34XX SP / RGSP (720x480 3:2, Allwinner H700)\n\n"
+    out << "# Sin and Punishment Recompiled - Handheld Configuration\n\n"
         << "[video]\n"
-        << "# Aspect ratio: \"expand\" (3:2 720x480 full screen) or \"original\" (4:3 pillarboxed)\n"
+        << "# Aspect ratio: \"expand\" (widescreen full screen) or \"original\" (4:3 pillarboxed)\n"
         << "aspect_ratio = \"" << g_config.video.aspect_ratio << "\"\n"
-        << "# Resolution scale: 2 (native 480p match for H700) or 1 (original 240p)\n"
+        << "# Resolution scale: 2 (native 480p) or 1 (original 240p)\n"
         << "resolution_scale = " << g_config.video.resolution_scale << "\n"
         << "vsync = " << (g_config.video.vsync ? "true" : "false") << "\n"
         << "target_fps = " << g_config.video.target_fps << "\n"
@@ -70,7 +87,7 @@ void save_config(const std::string& config_path) {
         << "music_volume = " << g_config.audio.music_volume << "\n"
         << "sfx_volume = " << g_config.audio.sfx_volume << "\n\n"
         << "[controls]\n"
-        << "# Scheme: \"dpad_strafe_shift\" (Stickless default), \"bumper_strafe\", \"face_strafe\", \"dpad_aim\", \"dpad_strafe\", or \"twin_stick\"\n"
+        << "# Scheme: \"auto\" (detect sticks), \"dpad_strafe_shift\" (Stickless default), \"bumper_strafe\", \"face_strafe\", \"dpad_aim\", \"dpad_strafe\", or \"twin_stick\"\n"
         << "scheme = \"" << g_config.controls.scheme << "\"\n"
         << "# Smart Lock-On: \"auto\" (Hold=Manual default), \"hold\" (Hold=Lock), or \"off\" (N64 toggle)\n"
         << "smart_lock_on = \"" << g_config.controls.smart_lock_on << "\"\n"
@@ -96,6 +113,8 @@ void save_config(const std::string& config_path) {
 }
 
 bool load_config(const std::string& config_path) {
+    g_config.controls.scheme = resolve_default_control_scheme();
+
     if (!std::filesystem::exists(config_path)) {
         save_config(config_path);
         return true;
@@ -120,7 +139,10 @@ bool load_config(const std::string& config_path) {
         }
 
         if (auto controls = tbl["controls"].as_table()) {
-            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_DPAD_STRAFE_SHIFT);
+            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_AUTO);
+            if (g_config.controls.scheme == CONTROL_SCHEME_AUTO) {
+                g_config.controls.scheme = resolve_default_control_scheme();
+            }
             g_config.controls.smart_lock_on = controls->get("smart_lock_on")->value_or(SMART_LOCK_AUTO);
             g_config.controls.aim_curve = controls->get("aim_curve")->value_or(AIM_CURVE_S_CURVE);
             g_config.controls.face_layout = controls->get("face_layout")->value_or(FACE_LAYOUT_NINTENDO);
@@ -136,7 +158,7 @@ bool load_config(const std::string& config_path) {
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_AIM &&
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE &&
                 g_config.controls.scheme != CONTROL_SCHEME_TWIN_STICK) {
-                g_config.controls.scheme = CONTROL_SCHEME_DPAD_STRAFE_SHIFT;
+                g_config.controls.scheme = resolve_default_control_scheme();
             }
 
             if (g_config.controls.smart_lock_on != SMART_LOCK_AUTO &&

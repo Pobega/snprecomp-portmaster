@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Automated build & packaging script for Sin and Punishment (NextUI H700 / PortMaster)
+# Automated build & packaging script for Sin and Punishment (PortMaster)
 # Target: AArch64 (ARM64) Cortex-A53, glibc 2.31 (Ubuntu 20.04 LTS baseline)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,19 @@ echo "Repository root: $REPO_ROOT"
 
 cd "$REPO_ROOT"
 
-TOOLBOX_CMD="toolbox run --container fedora-toolbox-44"
+if [ -f /run/.containerenv ]; then
+    TOOLBOX_CMD=""
+else
+    TOOLBOX_CMD="toolbox run --container fedora-toolbox-44"
+fi
+
+if command -v podman >/dev/null 2>&1; then
+    PODMAN_CMD="podman"
+elif command -v flatpak-spawn >/dev/null 2>&1; then
+    PODMAN_CMD="flatpak-spawn --host podman"
+else
+    PODMAN_CMD="podman"
+fi
 
 # 1. Host code generation
 echo "--> Checking host tools and code generation..."
@@ -64,122 +76,160 @@ if [ -f "$ROM_JP" ] && [ -n "$RSPRECOMP_BIN" ] && [ ! -f "$REPO_ROOT/rsp/n_aspMa
 fi
 
 # 2. Containerized Cross-Compilation (Ubuntu 20.04 Focal for glibc 2.31 compatibility)
-echo "--> Starting containerized cross-compilation (Ubuntu 20.04 glibc 2.31)..."
-
-# SELinux guardrail: NEVER use :Z with $HOME / $REPO_ROOT; use --security-opt label=disable
-podman run --rm \
-    --security-opt label=disable \
-    -v "$REPO_ROOT":"$REPO_ROOT" \
-    -w "$REPO_ROOT" \
-    docker.io/library/ubuntu:20.04 \
-    bash -c '
-set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
-export TZ=Etc/UTC
-
-# Configure multiarch apt repositories
-cat << "EOF" > /etc/apt/sources.list
+PACKAGE_ONLY="${PACKAGE_ONLY:-0}"
+if [ "$PACKAGE_ONLY" = "1" ] && [ -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" ]; then
+    echo "--> PACKAGE_ONLY=1 set and binary exists; skipping cross-compilation."
+else
+    echo "--> Checking/building cached container toolchain image..."
+    IMAGE_TAG="localhost/snprecomp-focal-arm64:latest"
+    if ! $PODMAN_CMD image exists "$IMAGE_TAG"; then
+        echo "Building $IMAGE_TAG..."
+        $PODMAN_CMD build -t "$IMAGE_TAG" - << "EOF"
+FROM docker.io/library/ubuntu:20.04
+ENV DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
+RUN cat << "SOURCES" > /etc/apt/sources.list
 deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ focal main restricted universe multiverse
 deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ focal-updates main restricted universe multiverse
 deb [arch=amd64] http://security.ubuntu.com/ubuntu/ focal-security main restricted universe multiverse
 deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ focal main restricted universe multiverse
 deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ focal-updates main restricted universe multiverse
 deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ focal-security main restricted universe multiverse
+SOURCES
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ninja-build \
+        gcc \
+        libc6-dev \
+        g++-10-aarch64-linux-gnu \
+        gcc-10-aarch64-linux-gnu \
+        libsdl2-dev:arm64 \
+        libgles2-mesa-dev:arm64 \
+        pkg-config \
+        python3-pip \
+        ca-certificates \
+        git \
+        make && \
+    pip3 install --no-cache-dir "cmake>=3.24,<4.0" && \
+    rm -rf /var/lib/apt/lists/*
 EOF
+    fi
 
-dpkg --add-architecture arm64
-apt-get update
-apt-get install -y --no-install-recommends \
-    ninja-build \
-    gcc \
-    libc6-dev \
-    g++-10-aarch64-linux-gnu \
-    gcc-10-aarch64-linux-gnu \
-    libsdl2-dev:arm64 \
-    libgles2-mesa-dev:arm64 \
-    pkg-config \
-    python3-pip \
-    ca-certificates \
-    git \
-    make
+    # Compile native host file_to_c for CrossCompile.cmake import
+    mkdir -p "$REPO_ROOT/build-host-focal"
+    gcc -O2 "$REPO_ROOT/tools/file_to_c.c" -o "$REPO_ROOT/build-host-focal/file_to_c"
 
-# Install CMake >= 3.24 (focal apt cmake is only 3.16)
-pip3 install --no-cache-dir "cmake>=3.24,<4.0"
-
-# Compile native host file_to_c for CrossCompile.cmake import
-mkdir -p build-host-focal
-gcc -O2 tools/file_to_c.c -o build-host-focal/file_to_c
-
+    echo "--> Running cross-compilation in $IMAGE_TAG..."
+    # SELinux guardrail: NEVER use :Z with $HOME / $REPO_ROOT; use --security-opt label=disable
+    $PODMAN_CMD run --rm \
+        --security-opt label=disable \
+        -v "$REPO_ROOT":"$REPO_ROOT" \
+        -w "$REPO_ROOT" \
+        "$IMAGE_TAG" \
+        bash -c '
+set -euo pipefail
 BUILD_DIR="build-portmaster-aarch64"
 mkdir -p "$BUILD_DIR"
-
 export PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
 
-cmake -B "$BUILD_DIR" -G Ninja \
-    -DCMAKE_SYSTEM_NAME=Linux \
-    -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-    -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc-10 \
-    -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++-10 \
-    -DCMAKE_CROSSCOMPILING=ON \
-    -DSNP_BACKEND_GLES3=ON \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_FLAGS="-mcpu=cortex-a53 -ffp-contract=off" \
-    -DCMAKE_CXX_FLAGS="-mcpu=cortex-a53 -ffp-contract=off" \
-    -DSNP_HOST_TOOLS_DIR="$PWD/build-host-focal" \
-    -DCMAKE_FIND_ROOT_PATH="/usr/aarch64-linux-gnu;/usr/lib/aarch64-linux-gnu"
+if [ ! -f "$BUILD_DIR/build.ninja" ]; then
+    cmake -B "$BUILD_DIR" -G Ninja \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+        -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc-10 \
+        -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++-10 \
+        -DCMAKE_CROSSCOMPILING=ON \
+        -DSNP_BACKEND_GLES3=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_FLAGS="-march=armv8-a -ffp-contract=off" \
+        -DCMAKE_CXX_FLAGS="-march=armv8-a -ffp-contract=off" \
+        -DSNP_HOST_TOOLS_DIR="$PWD/build-host-focal" \
+        -DCMAKE_FIND_ROOT_PATH="/usr/aarch64-linux-gnu;/usr/lib/aarch64-linux-gnu"
+fi
 
 ninja -C "$BUILD_DIR" -j"$(nproc)" SnPRecompiled
 aarch64-linux-gnu-strip "$BUILD_DIR/SnPRecompiled"
 '
+fi
 
-# 3. Package PortMaster zip
-echo "--> Staging and packaging PortMaster distribution..."
-mkdir -p "$REPO_ROOT/dist"
+# 3. Generate upstream patch
+echo "--> Generating PortMaster GLES3 patch..."
+mkdir -p "$REPO_ROOT/portmaster/patches"
+git diff 6e76c24c84e6fc65faeae89e8e75d7fac92aba1f -- \
+    CMakeLists.txt include/ lib-patches/ src/ tests/ \
+    tools/file_to_c.c tools/file_to_c.py tools/prepare_rom_for_recomp.py \
+    > "$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch"
+
+# 4. Copy stripped aarch64 binary
+echo "--> Staging aarch64 binary..."
 mkdir -p "$REPO_ROOT/portmaster/sinandpunishment"
-
-cp -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" "$REPO_ROOT/portmaster/sinandpunishment/SnPRecompiled"
-chmod +x "$REPO_ROOT/portmaster/sinandpunishment/SnPRecompiled"
+cp -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" "$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64"
+chmod +x "$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64"
 chmod +x "$REPO_ROOT/portmaster/Sin and Punishment.sh"
+rm -f "$REPO_ROOT/portmaster/sinandpunishment/SnPRecompiled"
 
-DIST_ZIP="$REPO_ROOT/dist/sinandpunishment-portmaster-h700.zip"
+# 5. Assemble the 3 clean distribution outputs
+echo "--> Assembling distribution outputs in dist/..."
+mkdir -p "$REPO_ROOT/dist"
+
+# Output 1: PR Submission Layout (dist/portmaster-pr/sinandpunishment/)
+echo "--> Assembling dist/portmaster-pr/sinandpunishment/..."
+PR_DIR="$REPO_ROOT/dist/portmaster-pr/sinandpunishment"
+rm -rf "$REPO_ROOT/dist/portmaster-pr"
+mkdir -p "$PR_DIR/patches"
+mkdir -p "$PR_DIR/sinandpunishment/licenses"
+mkdir -p "$PR_DIR/sinandpunishment/roms"
+mkdir -p "$PR_DIR/sinandpunishment/saves"
+
+cp -f "$REPO_ROOT/portmaster/port.json" "$PR_DIR/"
+cp -f "$REPO_ROOT/portmaster/README.md" "$PR_DIR/"
+cp -f "$REPO_ROOT/portmaster/gameinfo.xml" "$PR_DIR/"
+cp -f "$REPO_ROOT/portmaster/screenshot.png" "$PR_DIR/"
+cp -f "$REPO_ROOT/portmaster/Sin and Punishment.sh" "$PR_DIR/"
+cp -f "$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch" "$PR_DIR/patches/"
+
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64" "$PR_DIR/sinandpunishment/"
+cp -f "$REPO_ROOT/portmaster/sinandpunishment/snprecomp.toml" "$PR_DIR/sinandpunishment/"
+cp -rf "$REPO_ROOT/portmaster/sinandpunishment/licenses/"* "$PR_DIR/sinandpunishment/licenses/"
+touch "$PR_DIR/sinandpunishment/roms/.gitkeep"
+touch "$PR_DIR/sinandpunishment/saves/.gitkeep"
+
+# Output 2: PortMaster Testing Zip (dist/sinandpunishment.zip)
+echo "--> Packaging dist/sinandpunishment.zip..."
+DIST_ZIP="$REPO_ROOT/dist/sinandpunishment.zip"
 rm -f "$DIST_ZIP"
 
-cd "$REPO_ROOT/portmaster"
-# Create zip via python zipfile module to avoid host dependency on bare zip
 python3 -c "
 import os, zipfile
+
+def add_entry(z, src, arcname):
+    is_exec = arcname.endswith('.sh') or 'snprecompiled' in os.path.basename(arcname)
+    mode = 0o100755 if is_exec else 0o100644
+    zinfo = zipfile.ZipInfo.from_file(src, arcname)
+    zinfo.external_attr = mode << 16
+    with open(src, 'rb') as f:
+        z.writestr(zinfo, f.read(), compress_type=zipfile.ZIP_DEFLATED)
+
 dist_zip = '$DIST_ZIP'
 with zipfile.ZipFile(dist_zip, 'w', zipfile.ZIP_DEFLATED) as z:
-    for root, dirs, files in os.walk('.'):
-        for file in files:
-            p = os.path.join(root, file)
-            # Skip any ROM dumps in the staged package zip
-            rel = os.path.relpath(p, '.')
-            if rel.startswith('sinandpunishment/roms/') and not rel.endswith('.gitkeep'):
-                continue
-            z.write(p, rel)
+    add_entry(z, '$REPO_ROOT/portmaster/Sin and Punishment.sh', 'Sin and Punishment.sh')
+    for bf in ['port.json', 'README.md', 'gameinfo.xml', 'screenshot.png', 'testing_thread.txt']:
+        add_entry(z, os.path.join('$REPO_ROOT/portmaster', bf), os.path.join('sinandpunishment', bf))
+    add_entry(z, '$REPO_ROOT/portmaster/patches/snprecomp-portmaster-gles3.patch', 'sinandpunishment/patches/snprecomp-portmaster-gles3.patch')
+    add_entry(z, '$REPO_ROOT/portmaster/sinandpunishment/snprecompiled.aarch64', 'sinandpunishment/snprecompiled.aarch64')
+    add_entry(z, '$REPO_ROOT/portmaster/sinandpunishment/snprecomp.toml', 'sinandpunishment/snprecomp.toml')
+    lic_dir = '$REPO_ROOT/portmaster/sinandpunishment/licenses'
+    for lf in sorted(os.listdir(lic_dir)):
+        lp = os.path.join(lic_dir, lf)
+        if os.path.isfile(lp):
+            add_entry(z, lp, os.path.join('sinandpunishment/licenses', lf))
+    for d in ['roms', 'saves']:
+        gk = os.path.join('$REPO_ROOT/portmaster/sinandpunishment', d, '.gitkeep')
+        if not os.path.exists(gk):
+            with open(gk, 'w') as f: pass
+        add_entry(z, gk, os.path.join('sinandpunishment', d, '.gitkeep'))
 "
-cd "$REPO_ROOT"
-
-# Update dist/rgsp-ready directory (uses NextUI PORTS.pak .ports/ layout)
-echo "--> Updating dist/rgsp-ready handheld directory..."
-RGSP_PORT_DIR="$REPO_ROOT/dist/rgsp-ready/.ports/sinandpunishment"
-mkdir -p "$RGSP_PORT_DIR/saves"
-mkdir -p "$RGSP_PORT_DIR/roms"
-cp -f "$REPO_ROOT/portmaster/Sin and Punishment.sh" "$REPO_ROOT/dist/rgsp-ready/"
-cp -f "$REPO_ROOT/portmaster/sinandpunishment/snprecomp.toml" "$RGSP_PORT_DIR/"
-cp -f "$REPO_ROOT/portmaster/sinandpunishment/port.json" "$RGSP_PORT_DIR/"
-cp -f "$REPO_ROOT/portmaster/sinandpunishment/README.md" "$RGSP_PORT_DIR/"
-cp -f "$REPO_ROOT/build-portmaster-aarch64/SnPRecompiled" "$RGSP_PORT_DIR/SnPRecompiled"
-touch "$RGSP_PORT_DIR/saves/.gitkeep"
-touch "$RGSP_PORT_DIR/roms/.gitkeep"
-for rom in "$REPO_ROOT/portmaster/sinandpunishment/roms"/*.[zZnNvV]64 \
-           "$REPO_ROOT/dist/rgsp-ready/sinandpunishment/roms"/*.[zZnNvV]64; do
-    if [ -f "$rom" ]; then
-        cp -u "$rom" "$RGSP_PORT_DIR/roms/"
-    fi
-done
-rm -rf "$REPO_ROOT/dist/rgsp-ready/sinandpunishment"
 
 echo "=== Build Complete! ==="
-echo "Output package: $DIST_ZIP"
+echo "PR directory:   $PR_DIR"
+echo "Testing zip:    $DIST_ZIP"

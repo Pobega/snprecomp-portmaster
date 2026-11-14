@@ -10,6 +10,7 @@ namespace snp::handheld {
 constexpr const char* DEFAULT_CONFIG_FILE = "snprecomp.toml";
 constexpr const char* ASPECT_RATIO_EXPAND = "expand";
 constexpr const char* ASPECT_RATIO_ORIGINAL = "original";
+constexpr const char* CONTROL_SCHEME_AUTO = "auto";
 constexpr const char* CONTROL_SCHEME_BUMPER_STRAFE = "bumper_strafe";
 constexpr const char* CONTROL_SCHEME_FACE_STRAFE = "face_strafe";
 constexpr const char* CONTROL_SCHEME_DPAD_STRAFE_SHIFT = "dpad_strafe_shift";

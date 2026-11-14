@@ -517,7 +517,7 @@ int main() {
     // FBO feedback texture selection excluding current_fbo_addr_ and 0x0011B760
     {
         snp::gles3::FboManager fbos;
-        std::vector<uint8_t> dummy_rdram(1024 * 1024, 0);
+        std::vector<uint8_t> dummy_rdram(8 * 1024 * 1024, 0);
 
         fbos.bind_fbo(0x00200000u, 320, 240, dummy_rdram.data());
         fbos.bind_fbo(0x0011B760u, 320, 240, dummy_rdram.data());

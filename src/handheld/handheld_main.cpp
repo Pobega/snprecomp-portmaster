@@ -55,6 +55,9 @@ namespace {
 const std::string PROGRAM_NAME = "Sin and Punishment";
 const std::string VERSION_STRING = "0.2.11";
 
+constexpr int DEFAULT_WINDOW_WIDTH = 720;
+constexpr int DEFAULT_WINDOW_HEIGHT = 480;
+
 SDL_Window* s_window = nullptr;
 
 SDL_AudioDeviceID s_audio_device = 0;
@@ -178,10 +181,22 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
     if (!windowed_env && (!video_driver || std::strcmp(video_driver, "offscreen") != 0)) {
         flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
-    s_window = SDL_CreateWindow(PROGRAM_NAME.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 720, 480, flags);
+    int win_w = DEFAULT_WINDOW_WIDTH;
+    int win_h = DEFAULT_WINDOW_HEIGHT;
+    if (const char* env_w = std::getenv("SNP_WINDOW_W")) {
+        try { win_w = std::stoi(env_w); } catch (...) {}
+    }
+    if (const char* env_h = std::getenv("SNP_WINDOW_H")) {
+        try { win_h = std::stoi(env_h); } catch (...) {}
+    }
+
+    s_window = SDL_CreateWindow(PROGRAM_NAME.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h, flags);
     if (s_window == nullptr) {
         fprintf(stderr, "Failed to create SDL window: %s\n", SDL_GetError());
         std::exit(EXIT_FAILURE);
+    }
+    if (!windowed_env) {
+        SDL_ShowCursor(SDL_DISABLE);
     }
 
     return ultramodern::renderer::WindowHandle{ s_window };
