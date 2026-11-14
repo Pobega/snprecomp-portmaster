@@ -179,7 +179,7 @@ fi
 # 3. Generate upstream patch
 echo "--> Generating PortMaster GLES3 patch..."
 mkdir -p "$REPO_ROOT/portmaster/patches"
-git add -N tools/snp_patch.cpp tools/snp_patch_lib.h tests/test_snp_patch.cpp 2>/dev/null || true
+git add -N src/ tests/ tools/snp_patch.cpp tools/snp_patch_lib.h 2>/dev/null || true
 git diff 6e76c24c84e6fc65faeae89e8e75d7fac92aba1f -- \
     CMakeLists.txt include/ lib-patches/ src/ tests/ snp.jp.toml \
     tools/file_to_c.c tools/file_to_c.py tools/prepare_rom_for_recomp.py \

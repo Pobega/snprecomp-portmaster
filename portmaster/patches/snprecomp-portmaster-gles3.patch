@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 3c54509..e1e1ea2 100644
+index 3c54509..0e6bde2 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -50,12 +50,12 @@ if (APPLE)
@@ -115,7 +115,7 @@ index 3c54509..e1e1ea2 100644
  
  # src/main/register_overlays.cpp #includes RecompiledFuncs/recomp_overlays.inl,
  # which (like the rest of RecompiledFuncs/) doesn't exist yet on a fresh
-@@ -299,23 +319,40 @@ if (NOT SOURCES)
+@@ -299,23 +319,56 @@ if (NOT SOURCES)
      set(SOURCES ${CMAKE_BINARY_DIR}/snp_placeholder.cpp)
  endif()
  
@@ -137,10 +137,26 @@ index 3c54509..e1e1ea2 100644
 -    ${CMAKE_CURRENT_BINARY_DIR}
 -)
 +if (SNP_BACKEND_GLES3)
++    file(GLOB RCHEEVOS_SOURCES CONFIGURE_DEPENDS
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/api/*.c
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/client/*.c
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/hash/*.c
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/runtime/*.c
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src/util/*.c
++    )
++    add_library(rcheevos STATIC ${RCHEEVOS_SOURCES})
++    target_include_directories(rcheevos PUBLIC
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/include
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/src
++    )
++    target_compile_definitions(rcheevos PUBLIC RC_CLIENT_SUPPORTS_HASH)
++
 +    target_include_directories(SnPRecompiled PRIVATE
 +        ${CMAKE_SOURCE_DIR}/include
 +        ${CMAKE_SOURCE_DIR}/src/handheld
 +        ${CMAKE_SOURCE_DIR}/src/gles3
++        ${CMAKE_SOURCE_DIR}/lib/rcheevos/include
++        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/thirdparty/miniz
 +        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/include
 +        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/lib/tomlplusplus/include
 +        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/ultramodern/include
@@ -173,7 +189,7 @@ index 3c54509..e1e1ea2 100644
  
  # Generate icon_bytes.c from the app icon PNG (the window icon, set in
  # create_window in src/main/main.cpp).
-@@ -415,30 +452,46 @@ if (APPLE)
+@@ -415,30 +468,46 @@ if (APPLE)
  endif()
  
  if (CMAKE_SYSTEM_NAME MATCHES "Linux")
@@ -236,7 +252,7 @@ index 3c54509..e1e1ea2 100644
  endif()
  
  if (ANDROID)
-@@ -458,70 +511,6 @@ if (ANDROID)
+@@ -458,70 +527,6 @@ if (ANDROID)
      target_include_directories(SnPRecompiled PRIVATE ${SDL2_INCLUDE_DIRS})
  endif()
  
@@ -307,7 +323,7 @@ index 3c54509..e1e1ea2 100644
  # These libraries reference each other's symbols in both directions (e.g.
  # recompinput's player-assignment code calls into recompui's
  # ConfigPageControls, RecompiledFuncs calls into librecomp/ultramodern's
-@@ -544,21 +533,103 @@ else()
+@@ -544,21 +549,104 @@ else()
      set(SNP_LINK_GROUP_END "")
  endif()
  
@@ -333,6 +349,7 @@ index 3c54509..e1e1ea2 100644
 +        RecompiledFuncs
 +        librecomp
 +        ultramodern
++        rcheevos
 +        ${SNP_SDL2_TARGET}
 +        Threads::Threads
 +        ${CMAKE_DL_LIBS}
@@ -426,7 +443,7 @@ index 3c54509..e1e1ea2 100644
  
  
  # Embed all .nrm files in the "mods" directory
-@@ -599,6 +670,8 @@ elseif (EXISTS "${SNP_ROM_FILE}")
+@@ -599,6 +687,8 @@ elseif (EXISTS "${SNP_ROM_FILE}")
      )
      target_sources(SnPRecompiled PRIVATE ${CMAKE_SOURCE_DIR}/rsp/n_aspMain.cpp)
      target_compile_definitions(SnPRecompiled PRIVATE SNP_HAS_RSP_AUDIO)
@@ -435,7 +452,7 @@ index 3c54509..e1e1ea2 100644
  endif()
  
  target_sources(SnPRecompiled PRIVATE ${SOURCES})
-@@ -618,3 +691,12 @@ if (MSVC)
+@@ -618,3 +708,12 @@ if (MSVC)
      target_link_options(SnPRecompiled PRIVATE /DEBUG /OPT:REF /OPT:ICF)
      target_link_libraries(SnPRecompiled PRIVATE Dbghelp.lib)
  endif()
@@ -5077,10 +5094,10 @@ index 0000000..92e12c3
 +} // namespace snp::gles3
 diff --git a/src/handheld/handheld_config.cpp b/src/handheld/handheld_config.cpp
 new file mode 100644
-index 0000000..76b4b49
+index 0000000..774e8c3
 --- /dev/null
 +++ b/src/handheld/handheld_config.cpp
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,326 @@
 +#include "handheld_config.h"
 +
 +#include <algorithm>
@@ -5192,7 +5209,16 @@ index 0000000..76b4b49
 +        << "infinite_air_jumps = " << (g_config.cheats.infinite_air_jumps ? "true" : "false") << "\n\n"
 +        << "[rom]\n"
 +        << "# Preferred ROM region: \"auto\" (prefers English if present, else Japanese), \"en\", or \"jp\"\n"
-+        << "preferred_region = \"" << g_config.rom.preferred_region << "\"\n";
++        << "preferred_region = \"" << g_config.rom.preferred_region << "\"\n\n"
++        << "[retroachievements]\n"
++        << "enabled = " << (g_config.retroachievements.enabled ? "true" : "false") << "\n"
++        << "import_system_credentials = " << (g_config.retroachievements.import_system_credentials ? "true" : "false") << "\n"
++        << "notifications = " << (g_config.retroachievements.notifications ? "true" : "false") << "\n"
++        << "username = \"" << g_config.retroachievements.username << "\"\n"
++        << "token = \"" << g_config.retroachievements.token << "\"\n";
++    if (!g_config.retroachievements.password.empty()) {
++        out << "password = \"" << g_config.retroachievements.password << "\"\n";
++    }
 +}
 +
 +bool load_config(const std::string& config_path) {
@@ -5206,34 +5232,37 @@ index 0000000..76b4b49
 +    try {
 +        toml::table tbl = toml::parse_file(config_path);
 +
-+        if (auto video = tbl["video"].as_table()) {
-+            g_config.video.aspect_ratio = video->get("aspect_ratio")->value_or(ASPECT_RATIO_EXPAND);
-+            g_config.video.resolution_scale = static_cast<int>(video->get("resolution_scale")->value_or(int64_t(DEFAULT_RESOLUTION_SCALE)));
-+            g_config.video.vsync = video->get("vsync")->value_or(true);
-+            g_config.video.target_fps = static_cast<int>(video->get("target_fps")->value_or(int64_t(DEFAULT_TARGET_FPS)));
-+            g_config.video.sharp_textures = video->get("sharp_textures")->value_or(false);
-+            g_config.video.sharp_hud = video->get("sharp_hud")->value_or(true);
++        if (tbl["video"].is_table()) {
++            auto video = tbl["video"];
++            g_config.video.aspect_ratio = video["aspect_ratio"].value_or(ASPECT_RATIO_EXPAND);
++            g_config.video.resolution_scale = static_cast<int>(video["resolution_scale"].value_or(int64_t(DEFAULT_RESOLUTION_SCALE)));
++            g_config.video.vsync = video["vsync"].value_or(true);
++            g_config.video.target_fps = static_cast<int>(video["target_fps"].value_or(int64_t(DEFAULT_TARGET_FPS)));
++            g_config.video.sharp_textures = video["sharp_textures"].value_or(false);
++            g_config.video.sharp_hud = video["sharp_hud"].value_or(true);
 +        }
 +
-+        if (auto audio = tbl["audio"].as_table()) {
-+            g_config.audio.master_volume = static_cast<int>(audio->get("master_volume")->value_or(int64_t(DEFAULT_VOLUME)));
-+            g_config.audio.music_volume = static_cast<int>(audio->get("music_volume")->value_or(int64_t(DEFAULT_VOLUME)));
-+            g_config.audio.sfx_volume = static_cast<int>(audio->get("sfx_volume")->value_or(int64_t(DEFAULT_VOLUME)));
++        if (tbl["audio"].is_table()) {
++            auto audio = tbl["audio"];
++            g_config.audio.master_volume = static_cast<int>(audio["master_volume"].value_or(int64_t(DEFAULT_VOLUME)));
++            g_config.audio.music_volume = static_cast<int>(audio["music_volume"].value_or(int64_t(DEFAULT_VOLUME)));
++            g_config.audio.sfx_volume = static_cast<int>(audio["sfx_volume"].value_or(int64_t(DEFAULT_VOLUME)));
 +        }
 +
-+        if (auto controls = tbl["controls"].as_table()) {
-+            g_config.controls.scheme = controls->get("scheme")->value_or(CONTROL_SCHEME_AUTO);
++        if (tbl["controls"].is_table()) {
++            auto controls = tbl["controls"];
++            g_config.controls.scheme = controls["scheme"].value_or(CONTROL_SCHEME_AUTO);
 +            if (g_config.controls.scheme == CONTROL_SCHEME_AUTO) {
 +                g_config.controls.scheme = resolve_default_control_scheme();
 +            }
-+            g_config.controls.smart_lock_on = controls->get("smart_lock_on")->value_or(SMART_LOCK_AUTO);
-+            g_config.controls.aim_curve = controls->get("aim_curve")->value_or(AIM_CURVE_S_CURVE);
-+            g_config.controls.face_layout = controls->get("face_layout")->value_or(FACE_LAYOUT_NINTENDO);
-+            g_config.controls.stick_sensitivity = static_cast<float>(controls->get("stick_sensitivity")->value_or(double(DEFAULT_STICK_SENSITIVITY)));
-+            g_config.controls.deadzone = static_cast<float>(controls->get("deadzone")->value_or(double(DEFAULT_DEADZONE)));
-+            g_config.controls.analog_aim = controls->get("analog_aim")->value_or(true);
-+            g_config.controls.rumble = controls->get("rumble")->value_or(true);
-+            g_config.controls.swap_sticks = controls->get("swap_sticks")->value_or(false);
++            g_config.controls.smart_lock_on = controls["smart_lock_on"].value_or(SMART_LOCK_AUTO);
++            g_config.controls.aim_curve = controls["aim_curve"].value_or(AIM_CURVE_S_CURVE);
++            g_config.controls.face_layout = controls["face_layout"].value_or(FACE_LAYOUT_NINTENDO);
++            g_config.controls.stick_sensitivity = static_cast<float>(controls["stick_sensitivity"].value_or(double(DEFAULT_STICK_SENSITIVITY)));
++            g_config.controls.deadzone = static_cast<float>(controls["deadzone"].value_or(double(DEFAULT_DEADZONE)));
++            g_config.controls.analog_aim = controls["analog_aim"].value_or(true);
++            g_config.controls.rumble = controls["rumble"].value_or(true);
++            g_config.controls.swap_sticks = controls["swap_sticks"].value_or(false);
 +
 +            if (g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE_SHIFT &&
 +                g_config.controls.scheme != CONTROL_SCHEME_BUMPER_STRAFE &&
@@ -5259,18 +5288,29 @@ index 0000000..76b4b49
 +            snp::config::set_stick_sensitivity(g_config.controls.stick_sensitivity);
 +        }
 +
-+        if (auto cheats = tbl["cheats"].as_table()) {
-+            g_config.cheats.unlock_options = cheats->get("unlock_options")->value_or(false);
-+            g_config.cheats.infinite_health = cheats->get("infinite_health")->value_or(false);
-+            g_config.cheats.infinite_time = cheats->get("infinite_time")->value_or(false);
-+            g_config.cheats.infinite_continues = cheats->get("infinite_continues")->value_or(false);
-+            g_config.cheats.max_score = cheats->get("max_score")->value_or(false);
-+            g_config.cheats.invincible = cheats->get("invincible")->value_or(false);
-+            g_config.cheats.infinite_air_jumps = cheats->get("infinite_air_jumps")->value_or(false);
++        if (tbl["cheats"].is_table()) {
++            auto cheats = tbl["cheats"];
++            g_config.cheats.unlock_options = cheats["unlock_options"].value_or(false);
++            g_config.cheats.infinite_health = cheats["infinite_health"].value_or(false);
++            g_config.cheats.infinite_time = cheats["infinite_time"].value_or(false);
++            g_config.cheats.infinite_continues = cheats["infinite_continues"].value_or(false);
++            g_config.cheats.max_score = cheats["max_score"].value_or(false);
++            g_config.cheats.invincible = cheats["invincible"].value_or(false);
++            g_config.cheats.infinite_air_jumps = cheats["infinite_air_jumps"].value_or(false);
 +        }
 +
-+        if (auto rom = tbl["rom"].as_table()) {
-+            g_config.rom.preferred_region = rom->get("preferred_region")->value_or(ROM_PREFERRED_AUTO);
++        if (tbl["rom"].is_table()) {
++            g_config.rom.preferred_region = tbl["rom"]["preferred_region"].value_or(ROM_PREFERRED_AUTO);
++        }
++
++        if (tbl["retroachievements"].is_table()) {
++            auto ra = tbl["retroachievements"];
++            g_config.retroachievements.enabled = ra["enabled"].value_or(true);
++            g_config.retroachievements.import_system_credentials = ra["import_system_credentials"].value_or(true);
++            g_config.retroachievements.notifications = ra["notifications"].value_or(true);
++            g_config.retroachievements.username = ra["username"].value_or(std::string(""));
++            g_config.retroachievements.token = ra["token"].value_or(std::string(""));
++            g_config.retroachievements.password = ra["password"].value_or(std::string(""));
 +        }
 +    } catch (const std::exception& e) {
 +        std::cerr << "Warning: Error parsing " << config_path << ": " << e.what() << ", using defaults\n";
@@ -5386,10 +5426,10 @@ index 0000000..76b4b49
 +} // namespace snp::config
 diff --git a/src/handheld/handheld_config.h b/src/handheld/handheld_config.h
 new file mode 100644
-index 0000000..7973d8a
+index 0000000..23ffec1
 --- /dev/null
 +++ b/src/handheld/handheld_config.h
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,107 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -5470,12 +5510,22 @@ index 0000000..7973d8a
 +    std::string preferred_region = ROM_PREFERRED_AUTO;
 +};
 +
++struct RetroAchievementsConfig {
++    bool enabled = true;
++    bool import_system_credentials = true;
++    bool notifications = true;
++    std::string username;
++    std::string token;
++    std::string password;
++};
++
 +struct HandheldConfig {
 +    VideoSettings video;
 +    AudioSettings audio;
 +    ControlsSettings controls;
 +    CheatsSettings cheats;
 +    RomSettings rom;
++    RetroAchievementsConfig retroachievements;
 +};
 +
 +bool load_config(const std::string& config_path = DEFAULT_CONFIG_FILE);
@@ -6781,10 +6831,10 @@ index 0000000..c72e191
 +} // namespace snp::handheld
 diff --git a/src/handheld/handheld_main.cpp b/src/handheld/handheld_main.cpp
 new file mode 100644
-index 0000000..7066042
+index 0000000..05e2614
 --- /dev/null
 +++ b/src/handheld/handheld_main.cpp
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,469 @@
 +#include <algorithm>
 +#include <atomic>
 +#include <chrono>
@@ -6806,6 +6856,7 @@ index 0000000..7066042
 +#include "handheld_config.h"
 +#include "handheld_input.h"
 +#include "handheld_overlay.h"
++#include "ra_client.h"
 +#include "rom_loader.h"
 +
 +#include "librecomp/game.hpp"
@@ -7081,6 +7132,7 @@ index 0000000..7066042
 +extern "C" void recomp_run_ui_callbacks(uint8_t* rdram, recomp_context* ctx) {
 +    (void)ctx;
 +    snp_extras_frame(rdram);
++    snp::handheld::ra_do_frame(rdram);
 +}
 +
 +extern "C" void recomp_run_ui_callbacks_recomp(uint8_t* rdram, recomp_context* ctx) {
@@ -7183,7 +7235,9 @@ index 0000000..7066042
 +    ultramodern::renderer::callbacks_t renderer_callbacks{
 +        .create_render_context = [](uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
 +            snp::gles3::set_overlay_render_callback(snp::handheld::render_overlay);
-+            snp::gles3::set_overlay_active_callback(snp::handheld::is_overlay_open);
++            snp::gles3::set_overlay_active_callback([]() {
++                return snp::handheld::is_overlay_open() || snp::handheld::ra_has_active_toasts();
++            });
 +            snp::gles3::set_vsync_enabled(snp::handheld::get_config().video.vsync);
 +            return snp::gles3::create_renderer_context(rdram, window_handle, developer_mode);
 +        },
@@ -7225,6 +7279,8 @@ index 0000000..7066042
 +
 +    start_quit_watchdog();
 +
++    snp::handheld::ra_init();
++
 +    recomp::start({
 +        .argc = final_argc,
 +        .argv = final_argv.data(),
@@ -7241,6 +7297,7 @@ index 0000000..7066042
 +        .message_queue_control = {},
 +    });
 +
++    snp::handheld::ra_shutdown();
 +    snp::handheld::shutdown_overlay();
 +    snp::handheld::shutdown_input();
 +    fflush(stdout);
@@ -7249,10 +7306,10 @@ index 0000000..7066042
 +}
 diff --git a/src/handheld/handheld_overlay.cpp b/src/handheld/handheld_overlay.cpp
 new file mode 100644
-index 0000000..bfc59b6
+index 0000000..92f45de
 --- /dev/null
 +++ b/src/handheld/handheld_overlay.cpp
-@@ -0,0 +1,735 @@
+@@ -0,0 +1,964 @@
 +#include "handheld_overlay.h"
 +
 +#include <algorithm>
@@ -7270,6 +7327,7 @@ index 0000000..bfc59b6
 +#include "gl_loader.h"
 +#include "handheld_config.h"
 +#include "handheld_font.h"
++#include "ra_client.h"
 +#include "../gles3/gles3_renderer_context.h"
 +#include "ultramodern/ultramodern.hpp"
 +
@@ -7279,7 +7337,7 @@ index 0000000..bfc59b6
 +
 +namespace {
 +
-+constexpr int TOTAL_MENU_ROWS = 13;
++constexpr int TOTAL_MENU_ROWS = 15;
 +constexpr float FONT_CHAR_WIDTH = 8.0f;
 +constexpr float FONT_CHAR_HEIGHT = 8.0f;
 +constexpr float SOLID_UV_U = 127.5f / 128.0f;
@@ -7297,6 +7355,8 @@ index 0000000..bfc59b6
 +    VSync,
 +    Rumble,
 +    MasterVolume,
++    RetroAchievements,
++    SyncAchievements,
 +    SaveAndResume,
 +    SaveAndQuit,
 +};
@@ -7343,6 +7403,8 @@ index 0000000..bfc59b6
 +GLuint s_vao = 0;
 +GLuint s_vbo = 0;
 +GLuint s_font_texture = 0;
++GLuint s_toast_badge_texture = 0;
++std::vector<uint8_t> s_last_badge_pixels;
 +GLint s_loc_screen_size = -1;
 +GLint s_loc_texture = -1;
 +
@@ -7575,6 +7637,8 @@ index 0000000..bfc59b6
 +    case MenuRow::VSync: return "VSync";
 +    case MenuRow::Rumble: return "Rumble";
 +    case MenuRow::MasterVolume: return "Master Volume";
++    case MenuRow::RetroAchievements: return "RetroAchievements";
++    case MenuRow::SyncAchievements: return "Sync Achievements";
 +    case MenuRow::SaveAndResume: return "[ Save & Resume ]";
 +    case MenuRow::SaveAndQuit: return "[ Save & Quit ]";
 +    }
@@ -7635,6 +7699,28 @@ index 0000000..bfc59b6
 +        return cfg.controls.rumble ? "On" : "Off";
 +    case MenuRow::MasterVolume:
 +        return std::to_string(cfg.audio.master_volume) + "%";
++    case MenuRow::RetroAchievements:
++        return ra_get_status_text();
++    case MenuRow::SyncAchievements: {
++        if (!ra_is_enabled()) {
++            return "Disabled";
++        }
++        if (ra_is_syncing()) {
++            return "Syncing...";
++        }
++        size_t pending = ra_get_pending_sync_count();
++        if (pending > 0) {
++            return std::to_string(pending) + " Pending (Press A)";
++        }
++        std::string status = ra_get_status_text();
++        if (status == "No Credentials") {
++            return "Not Signed In";
++        }
++        if (ra_is_offline_mode() || status == "Offline") {
++            return "Reconnect (Press A)";
++        }
++        return "Up to Date (Press A)";
++    }
 +    case MenuRow::SaveAndResume:
 +    case MenuRow::SaveAndQuit:
 +        return "";
@@ -7710,6 +7796,14 @@ index 0000000..bfc59b6
 +        cfg.audio.master_volume = std::clamp(cfg.audio.master_volume + delta, 0, 100);
 +        break;
 +    }
++    case MenuRow::RetroAchievements:
++        ra_set_enabled(!ra_is_enabled());
++        break;
++    case MenuRow::SyncAchievements:
++        if (ra_is_enabled() && ra_get_status_text() != "No Credentials") {
++            ra_sync_now();
++        }
++        break;
 +    case MenuRow::SaveAndResume:
 +        save_config();
 +        close_overlay();
@@ -7726,8 +7820,8 @@ index 0000000..bfc59b6
 +
 +    add_solid_rect(0.0f, 0.0f, static_cast<float>(win_w), static_cast<float>(win_h), COLOR_BACKDROP);
 +
-+    float panel_w = 648.0f;
-+    float panel_h = 444.0f;
++    float panel_w = std::min(648.0f, std::max(580.0f, static_cast<float>(win_w) - 16.0f));
++    float panel_h = std::min(444.0f, std::max(400.0f, static_cast<float>(win_h) - 16.0f));
 +    float panel_x0 = (static_cast<float>(win_w) - panel_w) * 0.5f;
 +    float panel_y0 = (static_cast<float>(win_h) - panel_h) * 0.5f;
 +    float panel_x1 = panel_x0 + panel_w;
@@ -7841,11 +7935,14 @@ index 0000000..bfc59b6
 +    std::lock_guard<std::mutex> lock(s_overlay_mutex);
 +    if (s_gl_initialized) {
 +        if (SDL_GL_GetCurrentContext() != nullptr) {
++            if (s_toast_badge_texture) gl::glDeleteTextures(1, &s_toast_badge_texture);
 +            if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
 +            if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
 +            if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
 +            if (s_program) gl::glDeleteProgram(s_program);
 +        }
++        s_toast_badge_texture = 0;
++        s_last_badge_pixels.clear();
 +        s_font_texture = 0;
 +        s_vbo = 0;
 +        s_vao = 0;
@@ -7925,18 +8022,14 @@ index 0000000..bfc59b6
 +    }
 +}
 +
-+void render_overlay(int win_w, int win_h) {
-+    if (!s_overlay_open.load(std::memory_order_relaxed)) {
-+        return;
-+    }
-+
-+    std::lock_guard<std::mutex> lock(s_overlay_mutex);
-+
-+    if (!s_gl_initialized) {
-+        init_gl_resources();
-+    }
-+    if (!s_gl_initialized) {
-+        return;
++void render_menu(int win_w, int win_h) {
++    static std::string s_last_ra_snapshot;
++    std::string ra_snapshot = ra_get_status_text() + "|" +
++                              (ra_is_syncing() ? "1" : "0") + "|" +
++                              (ra_is_offline_mode() ? "1" : "0");
++    if (ra_snapshot != s_last_ra_snapshot) {
++        s_last_ra_snapshot = std::move(ra_snapshot);
++        s_mesh_dirty = true;
 +    }
 +
 +    if (win_w != s_last_win_w || win_h != s_last_win_h) {
@@ -7987,6 +8080,199 @@ index 0000000..bfc59b6
 +    gl::glUseProgram(0);
 +}
 +
++void render_toast_card(int win_w, int win_h) {
++    RaToastItem toast;
++    if (!ra_get_current_toast(toast)) {
++        return;
++    }
++
++    float elapsed = toast.elapsed_sec;
++    float duration = toast.duration_sec;
++
++    float alpha = 1.0f;
++    float x_slide = 0.0f;
++    constexpr float SLIDE_IN_DURATION = 0.35f;
++    constexpr float FADE_OUT_DURATION = 0.5f;
++
++    if (elapsed < SLIDE_IN_DURATION) {
++        float t = elapsed / SLIDE_IN_DURATION;
++        alpha = t;
++        x_slide = (1.0f - t) * -320.0f;
++    } else if (elapsed > duration - FADE_OUT_DURATION) {
++        float t = std::clamp((duration - elapsed) / FADE_OUT_DURATION, 0.0f, 1.0f);
++        alpha = t;
++        x_slide = (1.0f - t) * -40.0f;
++    }
++
++    float scale = std::clamp(static_cast<float>(win_h) / 480.0f, 0.75f, 1.5f);
++    float card_w = std::min(static_cast<float>(win_w) - 32.0f, 500.0f * scale);
++    float card_h = 64.0f * scale;
++    float card_x0 = 16.0f * scale + x_slide;
++    float card_y0 = static_cast<float>(win_h) - card_h - 16.0f * scale;
++    float card_x1 = card_x0 + card_w;
++    float card_y1 = card_y0 + card_h;
++
++    std::vector<OverlayVertex> toast_vertices;
++    std::vector<OverlayVertex> badge_vertices;
++
++    ColorRgba bg_color{0.06f, 0.08f, 0.12f, 0.94f * alpha};
++    ColorRgba border_color{0.95f, 0.78f, 0.20f, 0.95f * alpha};
++    ColorRgba bar_color{1.0f, 0.85f, 0.25f, 1.0f * alpha};
++    if (toast.accent_kind == 3) {
++        border_color = ColorRgba{0.85f, 0.30f, 0.25f, 0.95f * alpha};
++        bar_color = ColorRgba{1.0f, 0.35f, 0.30f, 1.0f * alpha};
++    } else if (toast.accent_kind == 1) {
++        border_color = ColorRgba{0.35f, 0.70f, 1.0f, 0.95f * alpha};
++        bar_color = ColorRgba{0.45f, 0.85f, 1.0f, 1.0f * alpha};
++    }
++
++    auto add_quad_to = [](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1,
++                          float u0, float v0, float u1, float v1, const ColorRgba& c) {
++        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
++        list.push_back({x1, y0, u1, v0, c.r, c.g, c.b, c.a});
++        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
++        list.push_back({x0, y0, u0, v0, c.r, c.g, c.b, c.a});
++        list.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
++        list.push_back({x0, y1, u0, v1, c.r, c.g, c.b, c.a});
++    };
++
++    auto add_rect_to = [&](std::vector<OverlayVertex>& list, float x0, float y0, float x1, float y1, const ColorRgba& c) {
++        add_quad_to(list, x0, y0, x1, y1, SOLID_UV_U, SOLID_UV_V, SOLID_UV_U, SOLID_UV_V, c);
++    };
++
++    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y1, bg_color);
++    add_rect_to(toast_vertices, card_x0, card_y0, card_x1, card_y0 + 1.5f, border_color);
++    add_rect_to(toast_vertices, card_x0, card_y1 - 1.5f, card_x1, card_y1, border_color);
++    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 1.5f, card_y1, border_color);
++    add_rect_to(toast_vertices, card_x1 - 1.5f, card_y0, card_x1, card_y1, border_color);
++    add_rect_to(toast_vertices, card_x0, card_y0, card_x0 + 4.0f * scale, card_y1, bar_color);
++
++    float badge_size = 46.0f * scale;
++    float badge_x0 = card_x0 + 10.0f * scale;
++    float badge_y0 = card_y0 + (card_h - badge_size) * 0.5f;
++    float badge_x1 = badge_x0 + badge_size;
++    float badge_y1 = badge_y0 + badge_size;
++
++    bool has_badge = !toast.rgba_pixels.empty();
++    if (has_badge) {
++        ColorRgba badge_col{1.0f, 1.0f, 1.0f, alpha};
++        add_quad_to(badge_vertices, badge_x0, badge_y0, badge_x1, badge_y1, 0.0f, 0.0f, 1.0f, 1.0f, badge_col);
++    }
++
++    float text_x = badge_x1 + 10.0f * scale;
++    float crisp_scale = std::max(1.0f, std::floor(scale));
++
++    auto add_string_to = [&](std::vector<OverlayVertex>& list, float x, float y, float s, const std::string& str, const ColorRgba& c) {
++        float avail_w = (card_x1 - 8.0f * scale) - x;
++        size_t max_chars = avail_w > 0.0f ? static_cast<size_t>(avail_w / (FONT_CHAR_WIDTH * s)) : 0;
++        std::string clipped = str;
++        if (clipped.size() > max_chars) {
++            clipped = (max_chars > 3) ? (clipped.substr(0, max_chars - 3) + "...") : clipped.substr(0, max_chars);
++        }
++        float cx = x;
++        for (char ch : clipped) {
++            if (ch < 32 || ch > 126) ch = '?';
++            int glyph = ch - 32;
++            int col = glyph % 16;
++            int row = glyph / 16;
++            float u0 = (col * 8) / 128.0f;
++            float v0 = (row * 8) / 64.0f;
++            float u1 = (col * 8 + 8) / 128.0f;
++            float v1 = (row * 8 + 8) / 64.0f;
++            add_quad_to(list, cx, y, cx + FONT_CHAR_WIDTH * s, y + FONT_CHAR_HEIGHT * s, u0, v0, u1, v1, c);
++            cx += FONT_CHAR_WIDTH * s;
++        }
++    };
++
++    ColorRgba title_color = (toast.accent_kind == 0) ? ColorRgba{1.0f, 0.84f, 0.20f, alpha} : ColorRgba{0.45f, 0.85f, 1.0f, alpha};
++    ColorRgba sub_color{1.0f, 1.0f, 1.0f, alpha};
++    ColorRgba detail_color{0.75f, 0.80f, 0.88f, 0.90f * alpha};
++
++    add_string_to(toast_vertices, text_x, card_y0 + 10.0f * scale, crisp_scale, toast.title, title_color);
++    add_string_to(toast_vertices, text_x, card_y0 + 26.0f * scale, crisp_scale * 1.25f, toast.subtitle, sub_color);
++    if (!toast.detail.empty()) {
++        add_string_to(toast_vertices, text_x, card_y0 + 45.0f * scale, crisp_scale, toast.detail, detail_color);
++    }
++
++    gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    gl::glViewport(0, 0, win_w, win_h);
++    gl::glDisable(GL_SCISSOR_TEST);
++    gl::glDisable(GL_DEPTH_TEST);
++    gl::glDepthMask(GL_FALSE);
++    gl::glDisable(GL_CULL_FACE);
++    gl::glEnable(GL_BLEND);
++    gl::glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
++
++    gl::glUseProgram(s_program);
++    gl::glUniform2f(s_loc_screen_size, static_cast<float>(win_w), static_cast<float>(win_h));
++    gl::glUniform1i(s_loc_texture, 0);
++
++    gl::glActiveTexture(GL_TEXTURE0);
++
++    if (!toast_vertices.empty()) {
++        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
++        gl::glBufferData(GL_ARRAY_BUFFER, toast_vertices.size() * sizeof(OverlayVertex), toast_vertices.data(), GL_STREAM_DRAW);
++        gl::glBindTexture(GL_TEXTURE_2D, s_font_texture);
++        gl::glBindVertexArray(s_vao);
++        gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(toast_vertices.size()));
++    }
++
++    if (has_badge && !badge_vertices.empty()) {
++        if (s_toast_badge_texture == 0) {
++            gl::glGenTextures(1, &s_toast_badge_texture);
++            gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
++            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++            gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        } else {
++            gl::glBindTexture(GL_TEXTURE_2D, s_toast_badge_texture);
++        }
++
++        if (s_last_badge_pixels != toast.rgba_pixels) {
++            gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, toast.rgba_pixels.data());
++            s_last_badge_pixels = toast.rgba_pixels;
++        }
++
++        gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
++        gl::glBufferData(GL_ARRAY_BUFFER, badge_vertices.size() * sizeof(OverlayVertex), badge_vertices.data(), GL_STREAM_DRAW);
++        gl::glBindVertexArray(s_vao);
++        gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(badge_vertices.size()));
++    }
++
++    gl::glDisable(GL_BLEND);
++    gl::glDepthMask(GL_TRUE);
++    gl::glBindVertexArray(0);
++    gl::glBindBuffer(GL_ARRAY_BUFFER, 0);
++    gl::glUseProgram(0);
++}
++
++void render_overlay(int win_w, int win_h) {
++    bool menu_open = s_overlay_open.load(std::memory_order_relaxed);
++    bool toasts_active = ra_has_active_toasts();
++
++    if (!menu_open && !toasts_active) {
++        return;
++    }
++
++    std::lock_guard<std::mutex> lock(s_overlay_mutex);
++
++    if (!s_gl_initialized) {
++        init_gl_resources();
++    }
++    if (!s_gl_initialized) {
++        return;
++    }
++
++    if (menu_open) {
++        render_menu(win_w, win_h);
++    }
++
++    if (toasts_active) {
++        render_toast_card(win_w, win_h);
++    }
++}
++
 +} // namespace snp::handheld
 diff --git a/src/handheld/handheld_overlay.h b/src/handheld/handheld_overlay.h
 new file mode 100644
@@ -8014,12 +8300,2273 @@ index 0000000..48fd888
 +void render_overlay(int win_w, int win_h);
 +
 +} // namespace snp::handheld
+diff --git a/src/handheld/png_decode.cpp b/src/handheld/png_decode.cpp
+new file mode 100644
+index 0000000..21d9279
+--- /dev/null
++++ b/src/handheld/png_decode.cpp
+@@ -0,0 +1,261 @@
++#include "png_decode.h"
++
++#include <cmath>
++#include <cstdlib>
++#include <cstring>
++#include <vector>
++
++#include "miniz.h"
++
++namespace snp::handheld {
++
++namespace {
++
++constexpr uint8_t PNG_SIGNATURE[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
++constexpr uint32_t MAX_PNG_DIMENSION = 4096;
++
++constexpr uint8_t PNG_COLOR_GRAY = 0;
++constexpr uint8_t PNG_COLOR_RGB = 2;
++constexpr uint8_t PNG_COLOR_INDEXED = 3;
++constexpr uint8_t PNG_COLOR_GRAY_ALPHA = 4;
++constexpr uint8_t PNG_COLOR_RGBA = 6;
++
++constexpr uint8_t PNG_FILTER_NONE = 0;
++constexpr uint8_t PNG_FILTER_SUB = 1;
++constexpr uint8_t PNG_FILTER_UP = 2;
++constexpr uint8_t PNG_FILTER_AVERAGE = 3;
++constexpr uint8_t PNG_FILTER_PAETH = 4;
++
++uint32_t read_big_endian_u32(const uint8_t* ptr) {
++    return (static_cast<uint32_t>(ptr[0]) << 24) |
++           (static_cast<uint32_t>(ptr[1]) << 16) |
++           (static_cast<uint32_t>(ptr[2]) << 8) |
++           static_cast<uint32_t>(ptr[3]);
++}
++
++uint8_t paeth_predictor(int a, int b, int c) {
++    int p = a + b - c;
++    int pa = std::abs(p - a);
++    int pb = std::abs(p - b);
++    int pc = std::abs(p - c);
++    if (pa <= pb && pa <= pc) {
++        return static_cast<uint8_t>(a);
++    }
++    if (pb <= pc) {
++        return static_cast<uint8_t>(b);
++    }
++    return static_cast<uint8_t>(c);
++}
++
++int bytes_per_pixel(uint8_t color_type) {
++    switch (color_type) {
++    case PNG_COLOR_GRAY:
++        return 1;
++    case PNG_COLOR_RGB:
++        return 3;
++    case PNG_COLOR_INDEXED:
++        return 1;
++    case PNG_COLOR_GRAY_ALPHA:
++        return 2;
++    case PNG_COLOR_RGBA:
++        return 4;
++    default:
++        return 0;
++    }
++}
++
++} // namespace
++
++bool decode_png(const uint8_t* data, size_t size, DecodedImage& out) {
++    if (data == nullptr || size < sizeof(PNG_SIGNATURE) + 12) {
++        return false;
++    }
++
++    if (std::memcmp(data, PNG_SIGNATURE, sizeof(PNG_SIGNATURE)) != 0) {
++        return false;
++    }
++
++    size_t cursor = sizeof(PNG_SIGNATURE);
++    uint32_t width = 0;
++    uint32_t height = 0;
++    uint8_t bit_depth = 0;
++    uint8_t color_type = 0;
++    bool has_ihdr = false;
++
++    std::vector<uint8_t> palette;
++    std::vector<uint8_t> trns;
++    std::vector<uint8_t> compressed_idat;
++
++    while (cursor + 8 <= size) {
++        uint32_t chunk_len = read_big_endian_u32(data + cursor);
++        uint32_t chunk_type = read_big_endian_u32(data + cursor + 4);
++        cursor += 8;
++
++        if (cursor + chunk_len + 4 > size) {
++            return false;
++        }
++
++        const uint8_t* chunk_data = data + cursor;
++
++        // "IHDR"
++        if (chunk_type == 0x49484452) {
++            if (chunk_len < 13) {
++                return false;
++            }
++            width = read_big_endian_u32(chunk_data);
++            height = read_big_endian_u32(chunk_data + 4);
++            bit_depth = chunk_data[8];
++            color_type = chunk_data[9];
++            uint8_t compression = chunk_data[10];
++            uint8_t filter = chunk_data[11];
++            uint8_t interlace = chunk_data[12];
++
++            if (width == 0 || width > MAX_PNG_DIMENSION || height == 0 || height > MAX_PNG_DIMENSION) {
++                return false;
++            }
++            if (bit_depth != 8 || compression != 0 || filter != 0 || interlace != 0) {
++                return false;
++            }
++            if (bytes_per_pixel(color_type) == 0) {
++                return false;
++            }
++            has_ihdr = true;
++        }
++        // "PLTE"
++        else if (chunk_type == 0x504C5445) {
++            if (chunk_len % 3 != 0 || chunk_len > 256 * 3) {
++                return false;
++            }
++            palette.assign(chunk_data, chunk_data + chunk_len);
++        }
++        // "tRNS"
++        else if (chunk_type == 0x74524E53) {
++            trns.assign(chunk_data, chunk_data + chunk_len);
++        }
++        // "IDAT"
++        else if (chunk_type == 0x49444154) {
++            compressed_idat.insert(compressed_idat.end(), chunk_data, chunk_data + chunk_len);
++        }
++        // "IEND"
++        else if (chunk_type == 0x49454E44) {
++            break;
++        }
++
++        cursor += chunk_len + 4; // skip data and 4-byte CRC
++    }
++
++    if (!has_ihdr || compressed_idat.empty()) {
++        return false;
++    }
++
++    if (color_type == PNG_COLOR_INDEXED && palette.empty()) {
++        return false;
++    }
++
++    int bpp = bytes_per_pixel(color_type);
++    size_t line_payload_bytes = static_cast<size_t>(width) * bpp;
++    size_t scanline_stride = 1 + line_payload_bytes;
++    size_t total_uncompressed_bytes = static_cast<size_t>(height) * scanline_stride;
++
++    std::vector<uint8_t> uncompressed(total_uncompressed_bytes);
++    mz_ulong dest_len = static_cast<mz_ulong>(total_uncompressed_bytes);
++    int status = mz_uncompress(uncompressed.data(), &dest_len,
++                               compressed_idat.data(), static_cast<mz_ulong>(compressed_idat.size()));
++    if (status != MZ_OK || dest_len != total_uncompressed_bytes) {
++        return false;
++    }
++
++    out.width = width;
++    out.height = height;
++    out.rgba.resize(static_cast<size_t>(width) * height * 4);
++
++    std::vector<uint8_t> current_line(line_payload_bytes);
++    std::vector<uint8_t> prior_line(line_payload_bytes, 0);
++
++    for (uint32_t y = 0; y < height; ++y) {
++        const uint8_t* src_scanline = uncompressed.data() + (y * scanline_stride);
++        uint8_t filter_type = src_scanline[0];
++        const uint8_t* raw = src_scanline + 1;
++
++        switch (filter_type) {
++        case PNG_FILTER_NONE:
++            std::memcpy(current_line.data(), raw, line_payload_bytes);
++            break;
++        case PNG_FILTER_SUB:
++            for (size_t i = 0; i < line_payload_bytes; ++i) {
++                uint8_t a = (i >= static_cast<size_t>(bpp)) ? current_line[i - bpp] : 0;
++                current_line[i] = static_cast<uint8_t>(raw[i] + a);
++            }
++            break;
++        case PNG_FILTER_UP:
++            for (size_t i = 0; i < line_payload_bytes; ++i) {
++                current_line[i] = static_cast<uint8_t>(raw[i] + prior_line[i]);
++            }
++            break;
++        case PNG_FILTER_AVERAGE:
++            for (size_t i = 0; i < line_payload_bytes; ++i) {
++                int a = (i >= static_cast<size_t>(bpp)) ? current_line[i - bpp] : 0;
++                int b = prior_line[i];
++                current_line[i] = static_cast<uint8_t>(raw[i] + ((a + b) / 2));
++            }
++            break;
++        case PNG_FILTER_PAETH:
++            for (size_t i = 0; i < line_payload_bytes; ++i) {
++                int a = (i >= static_cast<size_t>(bpp)) ? current_line[i - bpp] : 0;
++                int b = prior_line[i];
++                int c = (i >= static_cast<size_t>(bpp)) ? prior_line[i - bpp] : 0;
++                current_line[i] = static_cast<uint8_t>(raw[i] + paeth_predictor(a, b, c));
++            }
++            break;
++        default:
++            return false;
++        }
++
++        uint8_t* dst_row = out.rgba.data() + (static_cast<size_t>(y) * width * 4);
++
++        for (uint32_t x = 0; x < width; ++x) {
++            uint8_t* dst_px = dst_row + (x * 4);
++
++            if (color_type == PNG_COLOR_RGBA) {
++                const uint8_t* p = current_line.data() + (x * 4);
++                dst_px[0] = p[0];
++                dst_px[1] = p[1];
++                dst_px[2] = p[2];
++                dst_px[3] = p[3];
++            } else if (color_type == PNG_COLOR_RGB) {
++                const uint8_t* p = current_line.data() + (x * 3);
++                dst_px[0] = p[0];
++                dst_px[1] = p[1];
++                dst_px[2] = p[2];
++                dst_px[3] = 255;
++            } else if (color_type == PNG_COLOR_INDEXED) {
++                uint8_t idx = current_line[x];
++                if (static_cast<size_t>(idx) * 3 + 2 >= palette.size()) {
++                    return false;
++                }
++                dst_px[0] = palette[idx * 3 + 0];
++                dst_px[1] = palette[idx * 3 + 1];
++                dst_px[2] = palette[idx * 3 + 2];
++                dst_px[3] = (idx < trns.size()) ? trns[idx] : 255;
++            } else if (color_type == PNG_COLOR_GRAY_ALPHA) {
++                const uint8_t* p = current_line.data() + (x * 2);
++                dst_px[0] = p[0];
++                dst_px[1] = p[0];
++                dst_px[2] = p[0];
++                dst_px[3] = p[1];
++            } else if (color_type == PNG_COLOR_GRAY) {
++                uint8_t gray = current_line[x];
++                dst_px[0] = gray;
++                dst_px[1] = gray;
++                dst_px[2] = gray;
++                dst_px[3] = 255;
++            }
++        }
++
++        prior_line = current_line;
++    }
++
++    return true;
++}
++
++} // namespace snp::handheld
+diff --git a/src/handheld/png_decode.h b/src/handheld/png_decode.h
+new file mode 100644
+index 0000000..1ee92d5
+--- /dev/null
++++ b/src/handheld/png_decode.h
+@@ -0,0 +1,17 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <vector>
++
++namespace snp::handheld {
++
++struct DecodedImage {
++    uint32_t width = 0;
++    uint32_t height = 0;
++    std::vector<uint8_t> rgba;
++};
++
++bool decode_png(const uint8_t* data, size_t size, DecodedImage& out);
++
++} // namespace snp::handheld
+diff --git a/src/handheld/ra_client.cpp b/src/handheld/ra_client.cpp
+new file mode 100644
+index 0000000..a8e2f7c
+--- /dev/null
++++ b/src/handheld/ra_client.cpp
+@@ -0,0 +1,1154 @@
++#include "ra_client.h"
++
++#include <algorithm>
++#include <array>
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <deque>
++#include <dlfcn.h>
++#include <fstream>
++#include <iostream>
++#include <mutex>
++#include <string>
++#include <sys/types.h>
++#include <sys/wait.h>
++#include <thread>
++#include <unistd.h>
++#include <vector>
++
++#include "rc_client.h"
++#include "rc_consoles.h"
++#include "rc_api_user.h"
++#include "rc_api_runtime.h"
++#include "handheld_config.h"
++#include "png_decode.h"
++#include "ra_credentials.h"
++#include "ra_offline_cache.h"
++#include "rom_loader.h"
++#include "librecomp/game.hpp"
++
++namespace snp::handheld {
++
++namespace {
++
++constexpr uint32_t N64_RDRAM_MAX_SIZE = 8 * 1024 * 1024; // 8 MB
++constexpr const char* RA_USER_AGENT = "SnPRecompiled/0.2.0 (Linux; PortMaster)";
++constexpr const char* RA_BADGE_BASE_URL = "https://media.retroachievements.org/Badge/";
++constexpr float DEFAULT_TOAST_DURATION = 4.5f;
++
++enum class RaClientState {
++    Disabled,
++    NoCredentials,
++    LoggingIn,
++    Offline,
++    LoggedIn,
++    GameLoading,
++    GameLoaded,
++};
++
++std::atomic<RaClientState> s_state{RaClientState::NoCredentials};
++std::atomic<bool> s_is_offline_mode{false};
++std::atomic<bool> s_is_syncing{false};
++std::atomic<uint64_t> s_last_real_ping_time{0};
++
++std::string s_current_username;
++std::string s_current_token;
++std::string s_discovered_password;
++std::string s_game_title;
++uint32_t s_current_game_id = 0;
++std::string s_current_game_hash;
++uint32_t s_unlocked_achievements = 0;
++uint32_t s_total_achievements = 0;
++bool s_offline_toast_shown = false;
++
++rc_client_t* s_client = nullptr;
++uint8_t* s_current_rdram = nullptr;
++
++struct HttpRequestTask {
++    std::string url;
++    std::string post_data;
++    std::string content_type;
++    rc_client_server_callback_t callback = nullptr;
++    void* callback_data = nullptr;
++    bool is_badge_download = false;
++    bool is_sync_task = false;
++    std::string badge_name;
++    std::filesystem::path badge_save_path;
++};
++
++struct HttpResponseItem {
++    rc_client_server_callback_t callback = nullptr;
++    void* callback_data = nullptr;
++    std::string body;
++    int http_status_code = -1;
++    bool is_badge_download = false;
++    std::string badge_name;
++    std::filesystem::path badge_save_path;
++};
++
++std::mutex s_worker_mutex;
++std::condition_variable s_worker_cv;
++std::deque<HttpRequestTask> s_request_queue;
++std::atomic<bool> s_workers_running{false};
++std::thread s_worker_threads[2];
++
++std::mutex s_response_mutex;
++std::vector<HttpResponseItem> s_completed_responses;
++
++std::mutex s_toast_mutex;
++std::deque<RaToastItem> s_toast_queue;
++std::chrono::steady_clock::time_point s_last_frame_time;
++
++// libcurl dynamic function pointers
++using curl_easy_init_fn = void* (*)();
++using curl_easy_setopt_fn = int (*)(void*, int, ...);
++using curl_easy_perform_fn = int (*)(void*);
++using curl_easy_getinfo_fn = int (*)(void*, int, ...);
++using curl_easy_cleanup_fn = void (*)(void*);
++using curl_slist_append_fn = void* (*)(void*, const char*);
++using curl_slist_free_all_fn = void (*)(void*);
++
++void* s_libcurl_handle = nullptr;
++curl_easy_init_fn s_curl_easy_init = nullptr;
++curl_easy_setopt_fn s_curl_easy_setopt = nullptr;
++curl_easy_perform_fn s_curl_easy_perform = nullptr;
++curl_easy_getinfo_fn s_curl_easy_getinfo = nullptr;
++curl_easy_cleanup_fn s_curl_easy_cleanup = nullptr;
++curl_slist_append_fn s_curl_slist_append = nullptr;
++curl_slist_free_all_fn s_curl_slist_free_all = nullptr;
++
++constexpr int SNP_CURLOPT_URL = 10002;
++constexpr int SNP_CURLOPT_POSTFIELDS = 10015;
++constexpr int SNP_CURLOPT_USERAGENT = 10018;
++constexpr int SNP_CURLOPT_HTTPHEADER = 10023;
++constexpr int SNP_CURLOPT_TIMEOUT = 13;
++constexpr int SNP_CURLOPT_FOLLOWLOCATION = 52;
++constexpr int SNP_CURLOPT_WRITEFUNCTION = 20011;
++constexpr int SNP_CURLOPT_WRITEDATA = 10001;
++constexpr int SNP_CURLINFO_RESPONSE_CODE = 0x200000 + 2;
++
++size_t curl_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
++    size_t total = size * nmemb;
++    auto* out = reinterpret_cast<std::string*>(userdata);
++    if (out != nullptr) {
++        out->append(ptr, total);
++    }
++    return total;
++}
++
++void init_libcurl() {
++    if (s_libcurl_handle != nullptr) {
++        return;
++    }
++    s_libcurl_handle = dlopen("libcurl.so.4", RTLD_LAZY);
++    if (s_libcurl_handle == nullptr) {
++        s_libcurl_handle = dlopen("libcurl.so", RTLD_LAZY);
++    }
++    if (s_libcurl_handle != nullptr) {
++        s_curl_easy_init = reinterpret_cast<curl_easy_init_fn>(dlsym(s_libcurl_handle, "curl_easy_init"));
++        s_curl_easy_setopt = reinterpret_cast<curl_easy_setopt_fn>(dlsym(s_libcurl_handle, "curl_easy_setopt"));
++        s_curl_easy_perform = reinterpret_cast<curl_easy_perform_fn>(dlsym(s_libcurl_handle, "curl_easy_perform"));
++        s_curl_easy_getinfo = reinterpret_cast<curl_easy_getinfo_fn>(dlsym(s_libcurl_handle, "curl_easy_getinfo"));
++        s_curl_easy_cleanup = reinterpret_cast<curl_easy_cleanup_fn>(dlsym(s_libcurl_handle, "curl_easy_cleanup"));
++        s_curl_slist_append = reinterpret_cast<curl_slist_append_fn>(dlsym(s_libcurl_handle, "curl_slist_append"));
++        s_curl_slist_free_all = reinterpret_cast<curl_slist_free_all_fn>(dlsym(s_libcurl_handle, "curl_slist_free_all"));
++    }
++}
++
++bool execute_curl_dlopen(const HttpRequestTask& task, HttpResponseItem& item) {
++    if (s_curl_easy_init == nullptr || s_curl_easy_setopt == nullptr ||
++        s_curl_easy_perform == nullptr || s_curl_easy_getinfo == nullptr ||
++        s_curl_easy_cleanup == nullptr) {
++        return false;
++    }
++
++    void* curl = s_curl_easy_init();
++    if (curl == nullptr) {
++        return false;
++    }
++
++    void* headers = nullptr;
++    if (!task.content_type.empty() && s_curl_slist_append != nullptr) {
++        std::string header_line = "Content-Type: " + task.content_type;
++        headers = s_curl_slist_append(headers, header_line.c_str());
++        s_curl_easy_setopt(curl, SNP_CURLOPT_HTTPHEADER, headers);
++    }
++
++    s_curl_easy_setopt(curl, SNP_CURLOPT_URL, task.url.c_str());
++    s_curl_easy_setopt(curl, SNP_CURLOPT_USERAGENT, RA_USER_AGENT);
++    s_curl_easy_setopt(curl, SNP_CURLOPT_TIMEOUT, 15L);
++    s_curl_easy_setopt(curl, SNP_CURLOPT_FOLLOWLOCATION, 1L);
++    s_curl_easy_setopt(curl, SNP_CURLOPT_WRITEFUNCTION, curl_write_cb);
++    s_curl_easy_setopt(curl, SNP_CURLOPT_WRITEDATA, &item.body);
++
++    if (!task.post_data.empty()) {
++        s_curl_easy_setopt(curl, SNP_CURLOPT_POSTFIELDS, task.post_data.c_str());
++    }
++
++    int res = s_curl_easy_perform(curl);
++    long http_code = 0;
++    if (res == 0) {
++        s_curl_easy_getinfo(curl, SNP_CURLINFO_RESPONSE_CODE, &http_code);
++        item.http_status_code = static_cast<int>(http_code);
++    } else {
++        item.http_status_code = -1;
++    }
++
++    if (headers != nullptr && s_curl_slist_free_all != nullptr) {
++        s_curl_slist_free_all(headers);
++    }
++    s_curl_easy_cleanup(curl);
++    return true;
++}
++
++bool execute_curl_fork(const HttpRequestTask& task, HttpResponseItem& item) {
++    int pipefd[2];
++    if (pipe(pipefd) != 0) {
++        item.http_status_code = -1;
++        return false;
++    }
++
++    pid_t pid = fork();
++    if (pid < 0) {
++        close(pipefd[0]);
++        close(pipefd[1]);
++        item.http_status_code = -1;
++        return false;
++    }
++
++    if (pid == 0) {
++        close(pipefd[0]);
++        dup2(pipefd[1], STDOUT_FILENO);
++        close(pipefd[1]);
++
++        std::vector<std::string> args;
++        args.push_back("curl");
++        args.push_back("-sS");
++        args.push_back("-L");
++        args.push_back("--max-time");
++        args.push_back("15");
++        args.push_back("-A");
++        args.push_back(RA_USER_AGENT);
++        args.push_back("-w");
++        args.push_back("\n%{http_code}");
++
++        if (!task.content_type.empty()) {
++            args.push_back("-H");
++            args.push_back("Content-Type: " + task.content_type);
++        }
++
++        if (!task.post_data.empty()) {
++            args.push_back("-d");
++            args.push_back(task.post_data);
++        }
++
++        args.push_back(task.url);
++
++        std::vector<char*> argv;
++        argv.reserve(args.size() + 1);
++        for (auto& a : args) {
++            argv.push_back(a.data());
++        }
++        argv.push_back(nullptr);
++
++        execvp("curl", argv.data());
++        _exit(127);
++    }
++
++    close(pipefd[1]);
++
++    std::string output;
++    char buffer[4096];
++    ssize_t bytes_read = 0;
++    while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
++        output.append(buffer, static_cast<size_t>(bytes_read));
++    }
++    close(pipefd[0]);
++
++    int status = 0;
++    waitpid(pid, &status, 0);
++
++    if (WIFEXITED(status) && WEXITSTATUS(status) == 0 && !output.empty()) {
++        size_t last_nl = output.rfind('\n');
++        if (last_nl != std::string::npos) {
++            std::string code_str = output.substr(last_nl + 1);
++            try {
++                item.http_status_code = std::stoi(code_str);
++            } catch (...) {
++                item.http_status_code = -1;
++            }
++            item.body = output.substr(0, last_nl);
++        } else {
++            item.http_status_code = 200;
++            item.body = output;
++        }
++    } else {
++        item.http_status_code = -1;
++    }
++    return true;
++}
++
++void push_toast(const std::string& title, const std::string& subtitle, const std::string& detail,
++                std::vector<uint8_t> rgba_pixels = {}, float duration = DEFAULT_TOAST_DURATION, int accent = 0);
++
++void load_or_fetch_badge(const std::string& badge_name, const std::string& badge_url);
++
++std::vector<uint8_t> get_cached_badge_or_trophy(const std::string& badge_name);
++
++void trigger_game_load(rc_client_t* client);
++
++void trigger_login(rc_client_t* client);
++
++void perform_sync_job() {
++    s_is_syncing.store(true);
++
++    auto pending = load_pending_unlocks();
++    std::string token = get_config().retroachievements.token;
++    if (token.empty()) {
++        token = s_current_token;
++    }
++    if (token.empty()) {
++        std::string user = !s_current_username.empty() ? s_current_username : get_config().retroachievements.username;
++        std::string login_body;
++        int login_status = 0;
++        if (!user.empty() && try_serve_offline_response("r=login2&u=" + user, login_body, login_status)) {
++            rc_api_login_response_t login_resp{};
++            rc_api_server_response_t server_resp{};
++            server_resp.body = login_body.c_str();
++            server_resp.body_length = login_body.size();
++            server_resp.http_status_code = login_status;
++            if (rc_api_process_login_server_response(&login_resp, &server_resp) == RC_OK &&
++                login_resp.response.succeeded && login_resp.api_token) {
++                token = login_resp.api_token;
++            }
++            rc_api_destroy_login_response(&login_resp);
++        }
++    }
++
++    if (!pending.empty()) {
++        if (token.empty()) {
++            push_toast("RetroAchievements: Not Signed In", "Sync skipped",
++                       "Sign in online once to sync unlocks", {}, 3.5f, 3);
++            s_is_syncing.store(false);
++            return;
++        }
++        std::vector<PendingUnlock> synced_entries;
++        uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
++
++        for (const auto& entry : pending) {
++            uint32_t seconds_since_unlock = 0;
++            if (now_sec >= 1700000000ULL && entry.unlock_epoch_sec >= 1700000000ULL && now_sec >= entry.unlock_epoch_sec) {
++                seconds_since_unlock = static_cast<uint32_t>(now_sec - entry.unlock_epoch_sec);
++            }
++
++            rc_api_award_achievement_request_t req{};
++            req.username = entry.username.c_str();
++            req.api_token = token.c_str();
++            req.achievement_id = entry.achievement_id;
++            req.hardcore = 0;
++            req.game_hash = entry.game_hash.c_str();
++            req.seconds_since_unlock = seconds_since_unlock;
++
++            rc_api_request_t api_req{};
++            if (rc_api_init_award_achievement_request(&api_req, &req) == RC_OK) {
++                HttpRequestTask task;
++                if (api_req.url) task.url = api_req.url;
++                if (api_req.post_data) task.post_data = api_req.post_data;
++                if (api_req.content_type) task.content_type = api_req.content_type;
++
++                HttpResponseItem item;
++                if (!execute_curl_dlopen(task, item)) {
++                    execute_curl_fork(task, item);
++                }
++
++                if (item.http_status_code == 200) {
++                    rc_api_server_response_t server_resp{};
++                    server_resp.body = item.body.c_str();
++                    server_resp.body_length = item.body.size();
++                    server_resp.http_status_code = item.http_status_code;
++                    rc_api_award_achievement_response_t award_resp{};
++                    if (rc_api_process_award_achievement_server_response(&award_resp, &server_resp) == RC_OK &&
++                        award_resp.response.succeeded) {
++                        synced_entries.push_back(entry);
++                    }
++                    rc_api_destroy_award_achievement_response(&award_resp);
++                }
++                rc_api_destroy_request(&api_req);
++            }
++        }
++
++        if (!synced_entries.empty()) {
++            for (const auto& synced : synced_entries) {
++                std::vector<uint32_t> one_id = { synced.achievement_id };
++                remove_pending_unlocks(one_id, synced.username, synced.game_id);
++                record_synced_unlocks_to_startsession(synced.username, synced.game_id, one_id);
++            }
++            s_is_offline_mode.store(false);
++            push_toast("RetroAchievements Synced",
++                       "Uploaded " + std::to_string(synced_entries.size()) + " offline unlock(s)",
++                       s_game_title, {}, 4.0f, 0);
++        } else {
++            push_toast("RetroAchievements: Still Offline", "Sync failed",
++                       "Could not reach server", {}, 3.5f, 3);
++        }
++    } else {
++        if (s_is_offline_mode.load()) {
++            std::string user = !s_current_username.empty() ? s_current_username : get_config().retroachievements.username;
++            rc_api_login_request_t req{};
++            req.username = user.c_str();
++            req.api_token = token.c_str();
++
++            rc_api_request_t api_req{};
++            if (rc_api_init_login_request(&api_req, &req) == RC_OK) {
++                HttpRequestTask task;
++                if (api_req.url) task.url = api_req.url;
++                if (api_req.post_data) task.post_data = api_req.post_data;
++                if (api_req.content_type) task.content_type = api_req.content_type;
++
++                HttpResponseItem item;
++                if (!execute_curl_dlopen(task, item)) {
++                    execute_curl_fork(task, item);
++                }
++
++                if (item.http_status_code == 200 &&
++                    item.body.find("\"Success\":true") != std::string::npos) {
++                    s_is_offline_mode.store(false);
++                    push_toast("RetroAchievements Online", "Reconnected",
++                               "Up to date", {}, 3.5f, 1);
++                } else {
++                    push_toast("RetroAchievements: Still Offline", "Network probe failed",
++                               "Could not reach server", {}, 3.5f, 3);
++                }
++                rc_api_destroy_request(&api_req);
++            }
++        } else {
++            push_toast("RetroAchievements Synced", "Up to date",
++                       "All achievements synchronized", {}, 3.0f, 1);
++        }
++    }
++
++    s_is_syncing.store(false);
++}
++
++void http_worker_thread_func() {
++    while (s_workers_running.load()) {
++        HttpRequestTask task;
++        {
++            std::unique_lock<std::mutex> lock(s_worker_mutex);
++            s_worker_cv.wait(lock, [] {
++                return !s_workers_running.load() || !s_request_queue.empty();
++            });
++
++            if (!s_workers_running.load() && s_request_queue.empty()) {
++                break;
++            }
++
++            task = std::move(s_request_queue.front());
++            s_request_queue.pop_front();
++        }
++
++        if (task.is_sync_task) {
++            perform_sync_job();
++            continue;
++        }
++
++        HttpResponseItem item;
++        item.callback = task.callback;
++        item.callback_data = task.callback_data;
++        item.is_badge_download = task.is_badge_download;
++        item.badge_name = std::move(task.badge_name);
++        item.badge_save_path = std::move(task.badge_save_path);
++
++        if (task.is_badge_download) {
++            if (!execute_curl_dlopen(task, item)) {
++                execute_curl_fork(task, item);
++            }
++
++            if (item.http_status_code == 200 && !item.body.empty() && !item.badge_save_path.empty()) {
++                std::error_code ec;
++                std::filesystem::create_directories(item.badge_save_path.parent_path(), ec);
++                std::ofstream out(item.badge_save_path, std::ios::binary);
++                if (out.is_open()) {
++                    out.write(item.body.data(), item.body.size());
++                }
++            }
++        } else {
++            auto params = parse_url_params(task.post_data);
++            std::string r = params["r"];
++
++            if (r == "ping") {
++                uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
++                uint64_t last_ping = s_last_real_ping_time.load();
++                bool allow_real = (now_sec >= last_ping + 60) || (!s_is_offline_mode.load());
++                if (allow_real) {
++                    s_last_real_ping_time.store(now_sec);
++                    if (!execute_curl_dlopen(task, item)) {
++                        execute_curl_fork(task, item);
++                    }
++                    if (item.http_status_code == 200 && item.body.find("\"Success\":true") != std::string::npos) {
++                        if (s_is_offline_mode.load()) {
++                            s_is_offline_mode.store(false);
++                            ra_sync_now();
++                        }
++                    } else if (item.http_status_code <= 0) {
++                        item.http_status_code = 200;
++                        item.body = "{\"Success\":true}";
++                    }
++                } else {
++                    item.http_status_code = 200;
++                    item.body = "{\"Success\":true}";
++                }
++            } else if (r == "awardachievement") {
++                if (!execute_curl_dlopen(task, item)) {
++                    execute_curl_fork(task, item);
++                }
++                if (item.http_status_code == 200 && item.body.find("\"Success\":true") != std::string::npos) {
++                    if (s_is_offline_mode.load()) {
++                        s_is_offline_mode.store(false);
++                        if (get_pending_unlock_count() > 0) {
++                            ra_sync_now();
++                        }
++                    }
++                } else if (item.http_status_code <= 0) {
++                    s_is_offline_mode.store(true);
++                    PendingUnlock p;
++                    p.username = !params["u"].empty() ? params["u"] : s_current_username;
++                    p.game_id = s_current_game_id;
++                    try {
++                        p.achievement_id = static_cast<uint32_t>(std::stoul(params["a"]));
++                    } catch (...) {}
++                    p.game_hash = !params["m"].empty() ? params["m"] : s_current_game_hash;
++                    uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
++                    p.unlock_epoch_sec = (now_sec >= 1700000000ULL) ? now_sec : 0;
++                    queue_pending_unlock(p);
++
++                    item.http_status_code = 200;
++                    item.body = "{\"Success\":true,\"AchievementID\":" + std::to_string(p.achievement_id) + ",\"AchievementsRemaining\":0}";
++                }
++            } else {
++                bool served_from_cache = false;
++                if (s_is_offline_mode.load()) {
++                    std::string cache_body;
++                    int cache_status = 0;
++                    if (try_serve_offline_response(task.post_data, cache_body, cache_status)) {
++                        item.body = std::move(cache_body);
++                        item.http_status_code = cache_status;
++                        served_from_cache = true;
++                    }
++                }
++
++                if (!served_from_cache) {
++                    if (!execute_curl_dlopen(task, item)) {
++                        execute_curl_fork(task, item);
++                    }
++                    if (item.http_status_code == 200 &&
++                        (item.body.find("\"Success\":true") != std::string::npos ||
++                         item.body.find("\"Success\": true") != std::string::npos)) {
++                        cache_online_response(task.post_data, item.body);
++                    } else if (item.http_status_code <= 0) {
++                        s_is_offline_mode.store(true);
++                        std::string cache_body;
++                        int cache_status = 0;
++                        if (try_serve_offline_response(task.post_data, cache_body, cache_status)) {
++                            item.body = std::move(cache_body);
++                            item.http_status_code = cache_status;
++                        }
++                    }
++                }
++            }
++        }
++
++        {
++            std::lock_guard<std::mutex> lock(s_response_mutex);
++            s_completed_responses.push_back(std::move(item));
++        }
++    }
++}
++
++void push_toast(const std::string& title, const std::string& subtitle, const std::string& detail,
++                std::vector<uint8_t> rgba_pixels, float duration, int accent) {
++    if (!get_config().retroachievements.notifications) {
++        return;
++    }
++    RaToastItem item;
++    item.title = title;
++    item.subtitle = subtitle;
++    item.detail = detail;
++    item.rgba_pixels = rgba_pixels.empty() ? ra_generate_trophy_badge() : std::move(rgba_pixels);
++    item.duration_sec = duration;
++    item.elapsed_sec = 0.0f;
++    item.accent_kind = accent;
++
++    std::lock_guard<std::mutex> lock(s_toast_mutex);
++    s_toast_queue.push_back(std::move(item));
++}
++
++void load_or_fetch_badge(const std::string& badge_name, const std::string& badge_url) {
++    if (badge_name.empty()) {
++        return;
++    }
++    const std::filesystem::path config_dir = recomp::get_config_path();
++    std::filesystem::path badge_path = config_dir / "ra_badges" / (badge_name + ".png");
++
++    std::error_code ec;
++    if (std::filesystem::exists(badge_path, ec)) {
++        return;
++    }
++
++    HttpRequestTask task;
++    task.url = !badge_url.empty() ? badge_url : (std::string(RA_BADGE_BASE_URL) + badge_name + ".png");
++    task.is_badge_download = true;
++    task.badge_name = badge_name;
++    task.badge_save_path = badge_path;
++
++    std::lock_guard<std::mutex> lock(s_worker_mutex);
++    s_request_queue.push_back(std::move(task));
++    s_worker_cv.notify_one();
++}
++
++std::vector<uint8_t> get_cached_badge_or_trophy(const std::string& badge_name) {
++    if (!badge_name.empty()) {
++        const std::filesystem::path config_dir = recomp::get_config_path();
++        std::filesystem::path badge_path = config_dir / "ra_badges" / (badge_name + ".png");
++
++        std::error_code ec;
++        if (std::filesystem::exists(badge_path, ec)) {
++            std::ifstream file(badge_path, std::ios::binary | std::ios::ate);
++            if (file.is_open()) {
++                auto file_size = file.tellg();
++                if (file_size > 0) {
++                    std::vector<uint8_t> buffer(static_cast<size_t>(file_size));
++                    file.seekg(0, std::ios::beg);
++                    file.read(reinterpret_cast<char*>(buffer.data()), file_size);
++
++                    DecodedImage img;
++                    if (decode_png(buffer.data(), buffer.size(), img) && img.width == 64 && img.height == 64) {
++                        return img.rgba;
++                    }
++                }
++            }
++        }
++    }
++    return ra_generate_trophy_badge();
++}
++
++void on_server_call(const rc_api_request_t* request, rc_client_server_callback_t callback, void* callback_data, rc_client_t* client) {
++    (void)client;
++    HttpRequestTask task;
++    if (request->url) {
++        task.url = request->url;
++    }
++    if (request->post_data) {
++        task.post_data = request->post_data;
++    }
++    if (request->content_type) {
++        task.content_type = request->content_type;
++    }
++    task.callback = callback;
++    task.callback_data = callback_data;
++
++    std::lock_guard<std::mutex> lock(s_worker_mutex);
++    s_request_queue.push_back(std::move(task));
++    s_worker_cv.notify_one();
++}
++
++uint32_t on_read_memory(uint32_t address, uint8_t* buffer, uint32_t num_bytes, rc_client_t* client) {
++    (void)client;
++    if (s_current_rdram == nullptr) {
++        return 0;
++    }
++    return ra_read_n64_memory(s_current_rdram, address, buffer, num_bytes);
++}
++
++void on_game_load_completed(int result, const char* error_message, rc_client_t* client, void* userdata) {
++    (void)userdata;
++    if (result == RC_OK) {
++        s_state.store(RaClientState::GameLoaded);
++        const rc_client_game_t* game = rc_client_get_game_info(client);
++        if (game) {
++            s_current_game_id = game->id;
++            s_current_game_hash = (game->hash && game->hash[0]) ? game->hash : "";
++            s_game_title = (game->title && game->title[0]) ? game->title : "Sin and Punishment";
++        }
++
++        rc_client_user_game_summary_t summary{};
++        rc_client_get_user_game_summary(client, &summary);
++        s_unlocked_achievements = summary.num_unlocked_achievements;
++        s_total_achievements = summary.num_promoted_achievements;
++
++        std::string badge_name = (game && game->badge_name) ? game->badge_name : "";
++        std::string badge_url = (game && game->badge_url) ? game->badge_url : "";
++        if (!badge_name.empty()) {
++            load_or_fetch_badge(badge_name, badge_url);
++        }
++
++        if (!s_is_offline_mode.load()) {
++            rc_client_achievement_list_t* ach_list = rc_client_create_achievement_list(
++                client, RC_CLIENT_ACHIEVEMENT_CATEGORY_PROMOTED_AND_UNPROMOTED,
++                RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_PROGRESS);
++            if (ach_list) {
++                for (uint32_t b = 0; b < ach_list->num_buckets; ++b) {
++                    const auto& bucket = ach_list->buckets[b];
++                    for (uint32_t a = 0; a < bucket.num_achievements; ++a) {
++                        const rc_client_achievement_t* ach = bucket.achievements[a];
++                        if (ach && ach->badge_name[0] != '\0') {
++                            std::string aname = ach->badge_name;
++                            std::string aurl = (ach->badge_url && ach->badge_url[0]) ? ach->badge_url : "";
++                            load_or_fetch_badge(aname, aurl);
++                        }
++                    }
++                }
++                rc_client_destroy_achievement_list(ach_list);
++            }
++
++            if (get_pending_unlock_count() > 0) {
++                ra_sync_now();
++            }
++        }
++
++        std::string sub_header = s_is_offline_mode.load()
++            ? "RetroAchievements - Offline (Cached)"
++            : "RetroAchievements - Softcore";
++        std::string detail = std::to_string(s_unlocked_achievements) + "/" +
++                             std::to_string(s_total_achievements) + " Unlocked (" +
++                             std::to_string(summary.points_unlocked) + "/" +
++                             std::to_string(summary.points_available) + " pts)";
++        push_toast(sub_header, s_game_title, detail,
++                   get_cached_badge_or_trophy(badge_name), DEFAULT_TOAST_DURATION, 1);
++    } else {
++        s_state.store(RaClientState::LoggedIn);
++        std::fprintf(stderr, "[RA] Game identification failed: %s\n", error_message ? error_message : "Unknown");
++    }
++}
++
++void trigger_game_load(rc_client_t* client) {
++    s_state.store(RaClientState::GameLoading);
++    std::filesystem::path rom_path = get_selected_rom_path();
++    if (!rom_path.empty()) {
++        rc_client_begin_identify_and_load_game(client, RC_CONSOLE_NINTENDO_64,
++                                               rom_path.string().c_str(), nullptr, 0,
++                                               on_game_load_completed, nullptr);
++    } else {
++        s_state.store(RaClientState::LoggedIn);
++    }
++}
++
++void on_login_password_completed(int result, const char* error_message, rc_client_t* client, void* userdata);
++
++void on_login_token_completed(int result, const char* error_message, rc_client_t* client, void* userdata) {
++    (void)userdata;
++    if (result == RC_OK) {
++        s_state.store(RaClientState::LoggedIn);
++        const rc_client_user_t* user = rc_client_get_user_info(client);
++        if (user) {
++            if (user->display_name) {
++                s_current_username = user->display_name;
++            } else if (user->username) {
++                s_current_username = user->username;
++            }
++            if (user->token) {
++                s_current_token = user->token;
++            }
++        }
++        trigger_game_load(client);
++    } else {
++        if (!s_discovered_password.empty()) {
++            rc_client_begin_login_with_password(client, s_current_username.c_str(),
++                                                s_discovered_password.c_str(),
++                                                on_login_password_completed, nullptr);
++        } else {
++            s_state.store(RaClientState::Offline);
++            if (!s_offline_toast_shown) {
++                s_offline_toast_shown = true;
++                push_toast("RetroAchievements: Offline", "Sign-in failed",
++                           error_message ? error_message : "Network error", {}, 3.5f, 3);
++            }
++        }
++    }
++}
++
++void on_login_password_completed(int result, const char* error_message, rc_client_t* client, void* userdata) {
++    (void)userdata;
++    if (result == RC_OK) {
++        s_state.store(RaClientState::LoggedIn);
++        const rc_client_user_t* user = rc_client_get_user_info(client);
++        if (user) {
++            if (user->display_name) {
++                s_current_username = user->display_name;
++            } else if (user->username) {
++                s_current_username = user->username;
++            }
++            if (user->token) {
++                s_current_token = user->token;
++                auto& cfg = get_mutable_config().retroachievements;
++                cfg.username = s_current_username;
++                cfg.token = user->token;
++                cfg.password.clear();
++                save_config();
++            }
++        }
++        trigger_game_load(client);
++    } else {
++        s_state.store(RaClientState::Offline);
++        if (!s_offline_toast_shown) {
++            s_offline_toast_shown = true;
++            push_toast("RetroAchievements: Offline", "Sign-in failed",
++                       error_message ? error_message : "Invalid credentials", {}, 3.5f, 3);
++        }
++    }
++}
++
++void trigger_login(rc_client_t* client) {
++    const auto& cfg = get_config().retroachievements;
++    if (!cfg.enabled) {
++        s_state.store(RaClientState::Disabled);
++        return;
++    }
++
++    RaCredentials creds = discover_ra_credentials(cfg);
++    if (!creds.has_login()) {
++        s_state.store(RaClientState::NoCredentials);
++        return;
++    }
++
++    s_current_username = creds.username;
++    s_discovered_password = creds.password;
++    if (!creds.token.empty()) {
++        s_current_token = creds.token;
++    }
++
++    s_state.store(RaClientState::LoggingIn);
++    if (!creds.token.empty()) {
++        rc_client_begin_login_with_token(client, creds.username.c_str(), creds.token.c_str(),
++                                         on_login_token_completed, nullptr);
++    } else if (!creds.password.empty()) {
++        rc_client_begin_login_with_password(client, creds.username.c_str(), creds.password.c_str(),
++                                            on_login_password_completed, nullptr);
++    }
++}
++
++void on_rc_event(const rc_client_event_t* event, rc_client_t* client) {
++    (void)client;
++    if (!event) {
++        return;
++    }
++
++    switch (event->type) {
++    case RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED:
++        if (event->achievement) {
++            s_unlocked_achievements++;
++            std::string badge_name = event->achievement->badge_name[0] != '\0' ? event->achievement->badge_name : "";
++            std::string badge_url = (event->achievement->badge_url && event->achievement->badge_url[0]) ? event->achievement->badge_url : "";
++            if (!badge_name.empty()) {
++                load_or_fetch_badge(badge_name, badge_url);
++            }
++
++            std::string title = "ACHIEVEMENT UNLOCKED";
++            std::string sub = event->achievement->title ? event->achievement->title : "Achievement";
++            std::string desc = std::string(event->achievement->description ? event->achievement->description : "") +
++                               " (" + std::to_string(event->achievement->points) + " pts)";
++            if (s_is_offline_mode.load()) {
++                desc += " (Saved offline)";
++            }
++
++            push_toast(title, sub, desc, get_cached_badge_or_trophy(badge_name), 5.0f, 0);
++        }
++        break;
++
++    case RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_SHOW:
++    case RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_UPDATE:
++        if (event->achievement) {
++            std::string sub = event->achievement->title ? event->achievement->title : "Progress";
++            std::string desc = event->achievement->measured_progress[0] != '\0' ? event->achievement->measured_progress : "";
++            push_toast("ACHIEVEMENT PROGRESS", sub, desc, {}, 2.5f, 2);
++        }
++        break;
++
++    case RC_CLIENT_EVENT_SUBSET_COMPLETED:
++    case RC_CLIENT_EVENT_GAME_COMPLETED:
++        push_toast("MASTERY COMPLETE", s_game_title, "All achievements completed!", {}, 6.0f, 0);
++        break;
++
++    case RC_CLIENT_EVENT_SERVER_ERROR:
++        if (event->server_error && !s_offline_toast_shown && !s_is_offline_mode.load()) {
++            s_offline_toast_shown = true;
++            push_toast("RetroAchievements: Offline", "Server error",
++                       event->server_error->error_message ? event->server_error->error_message : "Unknown",
++                       {}, 3.5f, 3);
++        }
++        break;
++
++    default:
++        break;
++    }
++}
++
++} // namespace
++
++uint32_t ra_read_n64_memory(const uint8_t* rdram, uint32_t address, uint8_t* buffer, uint32_t num_bytes) {
++    if (rdram == nullptr || buffer == nullptr || address >= N64_RDRAM_MAX_SIZE || num_bytes == 0) {
++        return 0;
++    }
++
++    uint32_t avail = std::min(num_bytes, N64_RDRAM_MAX_SIZE - address);
++    std::memcpy(buffer, rdram + address, avail);
++    return avail;
++}
++
++void ra_init() {
++    init_libcurl();
++
++    s_workers_running.store(true);
++    for (auto& thread : s_worker_threads) {
++        thread = std::thread(http_worker_thread_func);
++    }
++
++    s_last_frame_time = std::chrono::steady_clock::now();
++
++    const auto& cfg = get_config().retroachievements;
++    if (!cfg.enabled) {
++        s_state.store(RaClientState::Disabled);
++        return;
++    }
++
++    s_client = rc_client_create(on_read_memory, on_server_call);
++    rc_client_set_hardcore_enabled(s_client, 0); // Enforce Softcore mode
++    rc_client_set_allow_background_memory_reads(s_client, 0);
++    rc_client_set_event_handler(s_client, on_rc_event);
++
++    trigger_login(s_client);
++
++    if (std::getenv("SNP_RA_DEMO_TOAST") != nullptr) {
++        push_toast("ACHIEVEMENT UNLOCKED", "Target Confirmed",
++                   "Defeat the Stage 1 boss without taking damage (10 pts)",
++                   ra_generate_trophy_badge(), 5.0f, 0);
++    }
++}
++
++void ra_shutdown() {
++    s_workers_running.store(false);
++    s_worker_cv.notify_all();
++    for (auto& thread : s_worker_threads) {
++        if (thread.joinable()) {
++            thread.join();
++        }
++    }
++
++    if (s_client) {
++        rc_client_destroy(s_client);
++        s_client = nullptr;
++    }
++
++    if (s_libcurl_handle) {
++        dlclose(s_libcurl_handle);
++        s_libcurl_handle = nullptr;
++    }
++}
++
++void ra_do_frame(uint8_t* rdram) {
++    s_current_rdram = rdram;
++
++    std::vector<HttpResponseItem> completed;
++    {
++        std::lock_guard<std::mutex> lock(s_response_mutex);
++        completed.swap(s_completed_responses);
++    }
++
++    for (const auto& item : completed) {
++        if (item.callback) {
++            rc_api_server_response_t server_resp{};
++            server_resp.body = item.body.data();
++            server_resp.body_length = item.body.size();
++            server_resp.http_status_code = item.http_status_code;
++            item.callback(&server_resp, item.callback_data);
++        }
++    }
++
++    if (s_client) {
++        if (rdram != nullptr) {
++            rc_client_do_frame(s_client);
++        } else {
++            rc_client_idle(s_client);
++        }
++    }
++
++    s_current_rdram = nullptr;
++
++    auto now = std::chrono::steady_clock::now();
++    float dt = std::chrono::duration<float>(now - s_last_frame_time).count();
++    s_last_frame_time = now;
++
++    std::lock_guard<std::mutex> lock(s_toast_mutex);
++    if (!s_toast_queue.empty()) {
++        s_toast_queue.front().elapsed_sec += dt;
++        if (s_toast_queue.front().elapsed_sec >= s_toast_queue.front().duration_sec) {
++            s_toast_queue.pop_front();
++        }
++    }
++}
++
++void ra_set_enabled(bool enabled) {
++    auto& cfg = get_mutable_config().retroachievements;
++    cfg.enabled = enabled;
++    save_config();
++
++    if (!enabled) {
++        s_state.store(RaClientState::Disabled);
++    } else {
++        if (s_client != nullptr) {
++            trigger_login(s_client);
++        }
++    }
++}
++
++bool ra_is_enabled() {
++    return get_config().retroachievements.enabled;
++}
++
++std::string ra_get_status_text() {
++    if (!ra_is_enabled()) {
++        return "Off";
++    }
++
++    if (s_is_syncing.load()) {
++        return "Syncing...";
++    }
++
++    RaClientState st = s_state.load();
++    switch (st) {
++    case RaClientState::Disabled:
++        return "Off";
++    case RaClientState::NoCredentials:
++        return "No Credentials";
++    case RaClientState::LoggingIn:
++    case RaClientState::GameLoading:
++        return "Signing in...";
++    case RaClientState::Offline:
++        return "Offline";
++    case RaClientState::LoggedIn:
++    case RaClientState::GameLoaded: {
++        size_t pending = ra_get_pending_sync_count();
++        if (s_is_offline_mode.load()) {
++            if (pending > 0) {
++                return "Offline - " + std::to_string(pending) + " Queued (" +
++                       std::to_string(s_unlocked_achievements) + "/" +
++                       std::to_string(s_total_achievements) + ")";
++            }
++            return "Offline - Cached (" + std::to_string(s_unlocked_achievements) + "/" +
++                   std::to_string(s_total_achievements) + ")";
++        }
++        if (pending > 0) {
++            return s_current_username + " (" + std::to_string(s_unlocked_achievements) + "/" +
++                   std::to_string(s_total_achievements) + " - " + std::to_string(pending) + " queued)";
++        }
++        return s_current_username + " (" + std::to_string(s_unlocked_achievements) + "/" +
++               std::to_string(s_total_achievements) + ")";
++    }
++    }
++    return "Off";
++}
++
++void ra_sync_now() {
++    if (s_is_syncing.load()) {
++        return;
++    }
++
++    if (s_state.load() == RaClientState::Offline && !s_is_offline_mode.load()) {
++        if (s_client != nullptr) {
++            trigger_login(s_client);
++        }
++        return;
++    }
++
++    HttpRequestTask task;
++    task.is_sync_task = true;
++
++    std::lock_guard<std::mutex> lock(s_worker_mutex);
++    s_request_queue.push_back(std::move(task));
++    s_worker_cv.notify_one();
++}
++
++size_t ra_get_pending_sync_count() {
++    return get_pending_unlock_count();
++}
++
++bool ra_is_syncing() {
++    return s_is_syncing.load();
++}
++
++bool ra_is_offline_mode() {
++    return s_is_offline_mode.load();
++}
++
++bool ra_has_active_toasts() {
++    if (!get_config().retroachievements.notifications) {
++        return false;
++    }
++    std::lock_guard<std::mutex> lock(s_toast_mutex);
++    return !s_toast_queue.empty();
++}
++
++bool ra_get_current_toast(RaToastItem& out_toast) {
++    if (!get_config().retroachievements.notifications) {
++        return false;
++    }
++    std::lock_guard<std::mutex> lock(s_toast_mutex);
++    if (s_toast_queue.empty()) {
++        return false;
++    }
++    out_toast = s_toast_queue.front();
++    return true;
++}
++
++std::vector<uint8_t> ra_generate_trophy_badge(uint32_t width, uint32_t height) {
++    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4, 0);
++
++    for (uint32_t y = 0; y < height; ++y) {
++        for (uint32_t x = 0; x < width; ++x) {
++            uint8_t r = 0, g = 0, b = 0, a = 0;
++
++            if (y >= 14 && y <= 34) {
++                int inset = (y > 22) ? (y - 22) / 2 : 0;
++                if (x >= 20 + inset && x <= 43 - inset) {
++                    r = 245; g = 197; b = 24; a = 255;
++                    if (y <= 16 || x == 20 + inset || x == 43 - inset) {
++                        r = 255; g = 224; b = 102;
++                    }
++                }
++            }
++
++            if (y >= 18 && y <= 28) {
++                if ((x >= 14 && x <= 19) || (x >= 44 && x <= 49)) {
++                    if (y == 18 || y == 28 || x == 14 || x == 49) {
++                        r = 212; g = 158; b = 14; a = 255;
++                    }
++                }
++            }
++
++            if (y >= 35 && y <= 45 && x >= 30 && x <= 33) {
++                r = 220; g = 170; b = 18; a = 255;
++            }
++
++            if (y >= 46 && y <= 52 && x >= 22 && x <= 41) {
++                r = 245; g = 197; b = 24; a = 255;
++                if (y == 46 || x == 22 || x == 41) {
++                    r = 255; g = 224; b = 102;
++                }
++            }
++
++            size_t idx = (static_cast<size_t>(y) * width + x) * 4;
++            rgba[idx + 0] = r;
++            rgba[idx + 1] = g;
++            rgba[idx + 2] = b;
++            rgba[idx + 3] = a;
++        }
++    }
++
++    return rgba;
++}
++
++} // namespace snp::handheld
+diff --git a/src/handheld/ra_client.h b/src/handheld/ra_client.h
+new file mode 100644
+index 0000000..a89e22a
+--- /dev/null
++++ b/src/handheld/ra_client.h
+@@ -0,0 +1,42 @@
++#pragma once
++
++#include <cstdint>
++#include <filesystem>
++#include <string>
++#include <vector>
++
++namespace snp::handheld {
++
++uint32_t ra_read_n64_memory(const uint8_t* rdram, uint32_t address, uint8_t* buffer, uint32_t num_bytes);
++
++void ra_init();
++void ra_shutdown();
++void ra_do_frame(uint8_t* rdram);
++
++void ra_set_enabled(bool enabled);
++bool ra_is_enabled();
++
++std::string ra_get_status_text();
++
++void ra_sync_now();
++size_t ra_get_pending_sync_count();
++bool ra_is_syncing();
++bool ra_is_offline_mode();
++
++bool ra_has_active_toasts();
++
++struct RaToastItem {
++    std::string title;
++    std::string subtitle;
++    std::string detail;
++    std::vector<uint8_t> rgba_pixels;
++    float duration_sec = 4.5f;
++    float elapsed_sec = 0.0f;
++    int accent_kind = 0;
++};
++
++bool ra_get_current_toast(RaToastItem& out_toast);
++
++std::vector<uint8_t> ra_generate_trophy_badge(uint32_t width = 64, uint32_t height = 64);
++
++} // namespace snp::handheld
+diff --git a/src/handheld/ra_credentials.cpp b/src/handheld/ra_credentials.cpp
+new file mode 100644
+index 0000000..313f64b
+--- /dev/null
++++ b/src/handheld/ra_credentials.cpp
+@@ -0,0 +1,197 @@
++#include "ra_credentials.h"
++
++#include <algorithm>
++#include <cctype>
++#include <cstdlib>
++#include <fstream>
++#include <vector>
++
++namespace snp::handheld {
++
++namespace {
++
++constexpr int MAX_PARENT_DIRECTORY_HOPS = 6;
++
++std::string trim_whitespace(const std::string& input) {
++    auto start = std::find_if_not(input.begin(), input.end(), [](unsigned char ch) {
++        return std::isspace(ch);
++    });
++    auto end = std::find_if_not(input.rbegin(), input.rend(), [](unsigned char ch) {
++        return std::isspace(ch);
++    }).base();
++    return (start < end) ? std::string(start, end) : std::string{};
++}
++
++std::string strip_enclosing_quotes(const std::string& input) {
++    std::string trimmed = trim_whitespace(input);
++    if (trimmed.size() >= 2) {
++        char first = trimmed.front();
++        char last = trimmed.back();
++        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
++            return trimmed.substr(1, trimmed.size() - 2);
++        }
++    }
++    return trimmed;
++}
++
++std::vector<std::filesystem::path> get_nextui_search_paths(const std::filesystem::path& working_dir) {
++    std::vector<std::filesystem::path> paths;
++
++    const char* env_sd = std::getenv("SDCARD_PATH");
++    if (env_sd != nullptr && env_sd[0] != '\0') {
++        paths.emplace_back(std::filesystem::path(env_sd) / ".userdata" / "shared" / "minuisettings.txt");
++    }
++
++    std::filesystem::path current = std::filesystem::absolute(working_dir);
++    for (int hop = 0; hop <= MAX_PARENT_DIRECTORY_HOPS; ++hop) {
++        paths.emplace_back(current / ".userdata" / "shared" / "minuisettings.txt");
++        if (!current.has_parent_path() || current == current.parent_path()) {
++            break;
++        }
++        current = current.parent_path();
++    }
++
++    paths.emplace_back("/mnt/SDCARD/.userdata/shared/minuisettings.txt");
++    paths.emplace_back("/mnt/sdcard/.userdata/shared/minuisettings.txt");
++    paths.emplace_back("/mnt/mmc/.userdata/shared/minuisettings.txt");
++
++    return paths;
++}
++
++std::vector<std::filesystem::path> get_retroarch_search_paths() {
++    std::vector<std::filesystem::path> paths;
++
++    const char* env_xdg = std::getenv("XDG_CONFIG_HOME");
++    if (env_xdg != nullptr && env_xdg[0] != '\0') {
++        paths.emplace_back(std::filesystem::path(env_xdg) / "retroarch" / "retroarch.cfg");
++    }
++
++    const char* env_home = std::getenv("HOME");
++    if (env_home != nullptr && env_home[0] != '\0') {
++        paths.emplace_back(std::filesystem::path(env_home) / ".config" / "retroarch" / "retroarch.cfg");
++    }
++
++    paths.emplace_back("/mnt/mmc/MUOS/retroarch/retroarch.cfg");
++    paths.emplace_back("/opt/muos/share/info/config/retroarch.cfg");
++    paths.emplace_back("/userdata/system/configs/retroarch/retroarch.cfg");
++    paths.emplace_back("/storage/.config/retroarch/retroarch.cfg");
++    paths.emplace_back("/home/ark/.config/retroarch/retroarch.cfg");
++
++    return paths;
++}
++
++} // namespace
++
++RaCredentials parse_nextui_ra_settings(std::istream& is) {
++    std::string raw_username;
++    std::string raw_server_username;
++    std::string raw_token;
++    std::string raw_password;
++
++    std::string line;
++    while (std::getline(is, line)) {
++        auto eq_pos = line.find('=');
++        if (eq_pos == std::string::npos) {
++            continue;
++        }
++        std::string key = trim_whitespace(line.substr(0, eq_pos));
++        std::string val = trim_whitespace(line.substr(eq_pos + 1));
++
++        if (key == "raUsername") {
++            raw_username = val;
++        } else if (key == "raServerUsername") {
++            raw_server_username = val;
++        } else if (key == "raToken") {
++            raw_token = val;
++        } else if (key == "raPassword") {
++            raw_password = val;
++        }
++    }
++
++    RaCredentials result;
++    if (!raw_token.empty()) {
++        result.username = !raw_server_username.empty() ? raw_server_username : raw_username;
++        result.token = raw_token;
++        result.password = raw_password;
++    } else if (!raw_password.empty()) {
++        result.username = raw_username;
++        result.token = "";
++        result.password = raw_password;
++    }
++    return result;
++}
++
++RaCredentials parse_retroarch_ra_cfg(std::istream& is) {
++    std::string username;
++    std::string token;
++    std::string password;
++
++    std::string line;
++    while (std::getline(is, line)) {
++        std::string trimmed = trim_whitespace(line);
++        if (trimmed.empty() || trimmed.front() == '#') {
++            continue;
++        }
++
++        auto eq_pos = trimmed.find('=');
++        if (eq_pos == std::string::npos) {
++            continue;
++        }
++
++        std::string key = trim_whitespace(trimmed.substr(0, eq_pos));
++        std::string val = strip_enclosing_quotes(trimmed.substr(eq_pos + 1));
++
++        if (key == "cheevos_username") {
++            username = val;
++        } else if (key == "cheevos_token") {
++            token = val;
++        } else if (key == "cheevos_password") {
++            password = val;
++        }
++    }
++
++    if (!username.empty() && (!token.empty() || !password.empty())) {
++        return RaCredentials{username, token, password};
++    }
++    return {};
++}
++
++RaCredentials discover_ra_credentials(const RetroAchievementsConfig& cfg, const std::filesystem::path& working_dir) {
++    if (!cfg.username.empty() && (!cfg.token.empty() || !cfg.password.empty())) {
++        return RaCredentials{cfg.username, cfg.token, cfg.password};
++    }
++
++    if (!cfg.import_system_credentials) {
++        return {};
++    }
++
++    for (const auto& path : get_nextui_search_paths(working_dir)) {
++        std::error_code ec;
++        if (std::filesystem::exists(path, ec)) {
++            std::ifstream file(path);
++            if (file.is_open()) {
++                RaCredentials creds = parse_nextui_ra_settings(file);
++                if (creds.has_login()) {
++                    return creds;
++                }
++            }
++        }
++    }
++
++    for (const auto& path : get_retroarch_search_paths()) {
++        std::error_code ec;
++        if (std::filesystem::exists(path, ec)) {
++            std::ifstream file(path);
++            if (file.is_open()) {
++                RaCredentials creds = parse_retroarch_ra_cfg(file);
++                if (creds.has_login()) {
++                    return creds;
++                }
++            }
++        }
++    }
++
++    return {};
++}
++
++} // namespace snp::handheld
+diff --git a/src/handheld/ra_credentials.h b/src/handheld/ra_credentials.h
+new file mode 100644
+index 0000000..a75e7d6
+--- /dev/null
++++ b/src/handheld/ra_credentials.h
+@@ -0,0 +1,29 @@
++#pragma once
++
++#include <filesystem>
++#include <istream>
++#include <string>
++
++#include "handheld_config.h"
++
++namespace snp::handheld {
++
++struct RaCredentials {
++    std::string username;
++    std::string token;
++    std::string password;
++
++    bool has_login() const {
++        return !username.empty() && (!token.empty() || !password.empty());
++    }
++};
++
++RaCredentials parse_nextui_ra_settings(std::istream& is);
++
++RaCredentials parse_retroarch_ra_cfg(std::istream& is);
++
++RaCredentials discover_ra_credentials(
++    const RetroAchievementsConfig& cfg,
++    const std::filesystem::path& working_dir = std::filesystem::current_path());
++
++} // namespace snp::handheld
+diff --git a/src/handheld/ra_offline_cache.cpp b/src/handheld/ra_offline_cache.cpp
+new file mode 100644
+index 0000000..7a4bfc1
+--- /dev/null
++++ b/src/handheld/ra_offline_cache.cpp
+@@ -0,0 +1,467 @@
++#include "ra_offline_cache.h"
++
++#include <cctype>
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++#include <ctime>
++#include <filesystem>
++#include <fstream>
++#include <mutex>
++#include <sstream>
++#include <unordered_set>
++#include <vector>
++
++#include "librecomp/game.hpp"
++#include "rc_api_user.h"
++
++namespace snp::handheld {
++
++namespace {
++
++int hex_val(char c) {
++    if (c >= '0' && c <= '9') return c - '0';
++    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
++    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
++    return -1;
++}
++
++std::mutex s_tsv_mutex;
++
++std::string to_lower_ascii(const std::string& in) {
++    std::string out = in;
++    for (char& c : out) {
++        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++    }
++    return out;
++}
++
++std::string sanitize_user_key(const std::string& in) {
++    return sanitize_filename(to_lower_ascii(in));
++}
++
++bool iequals_ascii(const std::string& a, const std::string& b) {
++    if (a.size() != b.size()) return false;
++    for (size_t i = 0; i < a.size(); ++i) {
++        if (std::tolower(static_cast<unsigned char>(a[i])) !=
++            std::tolower(static_cast<unsigned char>(b[i]))) {
++            return false;
++        }
++    }
++    return true;
++}
++
++std::vector<PendingUnlock> load_pending_unlocks_unlocked(const std::filesystem::path& cache_dir) {
++    std::filesystem::path tsv_path = cache_dir / "pending_unlocks.tsv";
++    std::ifstream in(tsv_path);
++    if (!in.is_open()) return {};
++
++    std::vector<PendingUnlock> list;
++    std::string line;
++    while (std::getline(in, line)) {
++        if (line.empty()) continue;
++        std::istringstream ss(line);
++        std::string u, gid_str, ach_str, hash, epoch_str;
++        if (std::getline(ss, u, '\t') &&
++            std::getline(ss, gid_str, '\t') &&
++            std::getline(ss, ach_str, '\t') &&
++            std::getline(ss, hash, '\t') &&
++            std::getline(ss, epoch_str, '\t')) {
++            PendingUnlock p;
++            p.username = u;
++            p.game_hash = hash;
++            try {
++                p.game_id = static_cast<uint32_t>(std::stoul(gid_str));
++                p.achievement_id = static_cast<uint32_t>(std::stoul(ach_str));
++                p.unlock_epoch_sec = static_cast<uint64_t>(std::stoull(epoch_str));
++            } catch (...) {
++                continue;
++            }
++            list.push_back(std::move(p));
++        }
++    }
++    return list;
++}
++
++} // namespace
++
++std::string url_decode(const std::string& in) {
++    std::string out;
++    out.reserve(in.size());
++    for (size_t i = 0; i < in.size(); ++i) {
++        if (in[i] == '+') {
++            out += ' ';
++        } else if (in[i] == '%' && i + 2 < in.size()) {
++            int h1 = hex_val(in[i + 1]);
++            int h2 = hex_val(in[i + 2]);
++            if (h1 >= 0 && h2 >= 0) {
++                out += static_cast<char>((h1 << 4) | h2);
++                i += 2;
++            } else {
++                out += in[i];
++            }
++        } else {
++            out += in[i];
++        }
++    }
++    return out;
++}
++
++std::unordered_map<std::string, std::string> parse_url_params(const std::string& query_or_post_data) {
++    std::unordered_map<std::string, std::string> params;
++    size_t start = 0;
++    while (start < query_or_post_data.size()) {
++        size_t end = query_or_post_data.find('&', start);
++        if (end == std::string::npos) end = query_or_post_data.size();
++        std::string token = query_or_post_data.substr(start, end - start);
++        if (!token.empty()) {
++            size_t eq = token.find('=');
++            if (eq != std::string::npos) {
++                std::string key = url_decode(token.substr(0, eq));
++                std::string val = url_decode(token.substr(eq + 1));
++                params[key] = val;
++            } else {
++                params[url_decode(token)] = "";
++            }
++        }
++        start = end + 1;
++    }
++    return params;
++}
++
++std::string sanitize_filename(const std::string& in) {
++    if (in.empty()) return "unknown";
++    std::string out;
++    out.reserve(in.size());
++    for (char c : in) {
++        if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.') {
++            out += c;
++        } else {
++            out += '_';
++        }
++    }
++    return out.empty() ? "unknown" : out;
++}
++
++std::filesystem::path get_default_ra_cache_dir() {
++    return recomp::get_config_path() / "ra_cache";
++}
++
++bool cache_online_response(const std::string& post_data, const std::string& response_body,
++                           const std::filesystem::path& cache_dir) {
++    if (response_body.find("\"Success\":true") == std::string::npos &&
++        response_body.find("\"Success\": true") == std::string::npos &&
++        response_body.find("\"Success\":1") == std::string::npos) {
++        return false;
++    }
++
++    auto params = parse_url_params(post_data);
++    std::string r = params["r"];
++    if (r.empty()) return false;
++
++    std::filesystem::path target_file;
++    bool is_login = false;
++
++    if (r == "login2") {
++        std::string u = params["u"];
++        if (u.empty()) return false;
++        target_file = cache_dir / ("login_" + sanitize_user_key(u) + ".json");
++        is_login = true;
++    } else if (r == "gameid") {
++        std::string m = params["m"];
++        if (m.empty()) return false;
++        target_file = cache_dir / ("gameid_" + sanitize_filename(m) + ".json");
++    } else if (r == "patch") {
++        std::string g_or_m = !params["g"].empty() ? params["g"] : params["m"];
++        if (g_or_m.empty()) return false;
++        target_file = cache_dir / ("patch_" + sanitize_filename(g_or_m) + ".json");
++    } else if (r == "achievementsets") {
++        std::string g_or_m = !params["g"].empty() ? params["g"] : params["m"];
++        if (g_or_m.empty()) return false;
++        target_file = cache_dir / ("achievementsets_" + sanitize_filename(g_or_m) + ".json");
++    } else if (r == "startsession") {
++        std::string u = params["u"];
++        std::string g = params["g"];
++        if (u.empty() || g.empty()) return false;
++        target_file = cache_dir / ("startsession_" + sanitize_user_key(u) + "_" + sanitize_filename(g) + ".json");
++    } else if (r == "unlocks") {
++        std::string u = params["u"];
++        std::string g = params["g"];
++        std::string h = !params["h"].empty() ? params["h"] : "0";
++        if (u.empty() || g.empty()) return false;
++        target_file = cache_dir / ("unlocks_" + sanitize_user_key(u) + "_" + sanitize_filename(g) + "_" + sanitize_filename(h) + ".json");
++    } else {
++        return false;
++    }
++
++    std::error_code ec;
++    std::filesystem::create_directories(cache_dir, ec);
++
++    std::filesystem::path tmp_file = target_file;
++    tmp_file += ".tmp";
++
++    std::ofstream out(tmp_file, std::ios::binary | std::ios::trunc);
++    if (!out.is_open()) return false;
++    if (is_login) {
++        std::filesystem::permissions(tmp_file,
++            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
++            std::filesystem::perm_options::replace, ec);
++    }
++    out.write(response_body.data(), response_body.size());
++    out.close();
++
++    std::filesystem::rename(tmp_file, target_file, ec);
++    if (ec) {
++        std::filesystem::remove(tmp_file, ec);
++        return false;
++    }
++
++    return true;
++}
++
++bool try_serve_offline_response(const std::string& post_data, std::string& out_body, int& out_status,
++                                const std::filesystem::path& cache_dir) {
++    auto params = parse_url_params(post_data);
++    std::string r = params["r"];
++    if (r.empty()) return false;
++
++    std::filesystem::path target_file;
++    bool is_startsession = false;
++
++    if (r == "login2") {
++        std::string u = params["u"];
++        target_file = cache_dir / ("login_" + sanitize_user_key(u) + ".json");
++    } else if (r == "gameid") {
++        std::string m = params["m"];
++        target_file = cache_dir / ("gameid_" + sanitize_filename(m) + ".json");
++    } else if (r == "patch") {
++        std::string g_or_m = !params["g"].empty() ? params["g"] : params["m"];
++        target_file = cache_dir / ("patch_" + sanitize_filename(g_or_m) + ".json");
++    } else if (r == "achievementsets") {
++        std::string g_or_m = !params["g"].empty() ? params["g"] : params["m"];
++        target_file = cache_dir / ("achievementsets_" + sanitize_filename(g_or_m) + ".json");
++    } else if (r == "startsession") {
++        std::string u = params["u"];
++        std::string g = params["g"];
++        target_file = cache_dir / ("startsession_" + sanitize_user_key(u) + "_" + sanitize_filename(g) + ".json");
++        is_startsession = true;
++    } else if (r == "unlocks") {
++        std::string u = params["u"];
++        std::string g = params["g"];
++        std::string h = !params["h"].empty() ? params["h"] : "0";
++        target_file = cache_dir / ("unlocks_" + sanitize_user_key(u) + "_" + sanitize_filename(g) + "_" + sanitize_filename(h) + ".json");
++    } else {
++        return false;
++    }
++
++    std::error_code ec;
++    if (!std::filesystem::exists(target_file, ec)) {
++        return false;
++    }
++
++    std::ifstream in(target_file, std::ios::binary | std::ios::ate);
++    if (!in.is_open()) return false;
++    auto sz = in.tellg();
++    if (sz <= 0) return false;
++    std::string file_content(static_cast<size_t>(sz), '\0');
++    in.seekg(0, std::ios::beg);
++    in.read(&file_content[0], sz);
++    in.close();
++
++    if (is_startsession) {
++        std::string u = params["u"];
++        uint32_t gid = 0;
++        try {
++            gid = static_cast<uint32_t>(std::stoul(params["g"]));
++        } catch (...) {}
++        auto pending = load_pending_unlocks(cache_dir);
++        std::vector<PendingUnlock> for_this_game;
++        for (const auto& p : pending) {
++            if ((p.username.empty() || iequals_ascii(p.username, u)) && (p.game_id == 0 || p.game_id == gid)) {
++                for_this_game.push_back(p);
++            }
++        }
++        out_body = merge_start_session_unlocks(file_content, for_this_game);
++    } else {
++        out_body = std::move(file_content);
++    }
++
++    out_status = 200;
++    return true;
++}
++
++std::string merge_start_session_unlocks(const std::string& original_json,
++                                        const std::vector<PendingUnlock>& pending_for_game) {
++    rc_api_start_session_response_t response{};
++    rc_api_server_response_t server_resp{};
++    server_resp.body = original_json.c_str();
++    server_resp.body_length = original_json.size();
++
++    int parse_res = rc_api_process_start_session_server_response(&response, &server_resp);
++
++    struct UnlockItem {
++        uint32_t id = 0;
++        time_t when = 0;
++    };
++
++    std::vector<UnlockItem> unlocks;
++    std::unordered_set<uint32_t> seen;
++    std::vector<UnlockItem> hardcore_unlocks;
++    time_t server_now = std::time(nullptr);
++
++    if (parse_res == RC_OK && response.response.succeeded) {
++        if (response.server_now > 0) {
++            server_now = response.server_now;
++        }
++        for (uint32_t i = 0; i < response.num_unlocks; ++i) {
++            unlocks.push_back({ response.unlocks[i].achievement_id, response.unlocks[i].when });
++            seen.insert(response.unlocks[i].achievement_id);
++        }
++        for (uint32_t i = 0; i < response.num_hardcore_unlocks; ++i) {
++            hardcore_unlocks.push_back({ response.hardcore_unlocks[i].achievement_id, response.hardcore_unlocks[i].when });
++        }
++    }
++
++    for (const auto& p : pending_for_game) {
++        if (p.achievement_id > 0 && seen.find(p.achievement_id) == seen.end()) {
++            time_t when_val = (p.unlock_epoch_sec > 0) ? static_cast<time_t>(p.unlock_epoch_sec) : server_now;
++            unlocks.push_back({ p.achievement_id, when_val });
++            seen.insert(p.achievement_id);
++        }
++    }
++
++    rc_api_destroy_start_session_response(&response);
++
++    std::ostringstream ss;
++    ss << "{\"Success\":true,\"Unlocks\":[";
++    for (size_t i = 0; i < unlocks.size(); ++i) {
++        if (i > 0) ss << ",";
++        ss << "{\"ID\":" << unlocks[i].id << ",\"When\":" << unlocks[i].when << "}";
++    }
++    ss << "],\"HardcoreUnlocks\":[";
++    for (size_t i = 0; i < hardcore_unlocks.size(); ++i) {
++        if (i > 0) ss << ",";
++        ss << "{\"ID\":" << hardcore_unlocks[i].id << ",\"When\":" << hardcore_unlocks[i].when << "}";
++    }
++    ss << "],\"ServerNow\":" << server_now << "}";
++
++    return ss.str();
++}
++
++bool queue_pending_unlock(const PendingUnlock& unlock, const std::filesystem::path& cache_dir) {
++    if (unlock.achievement_id == 0) return false;
++    std::lock_guard<std::mutex> lock(s_tsv_mutex);
++
++    auto existing = load_pending_unlocks_unlocked(cache_dir);
++    for (const auto& e : existing) {
++        if (iequals_ascii(e.username, unlock.username) && e.game_id == unlock.game_id && e.achievement_id == unlock.achievement_id) {
++            return true;
++        }
++    }
++
++    std::error_code ec;
++    std::filesystem::create_directories(cache_dir, ec);
++
++    std::filesystem::path tsv_path = cache_dir / "pending_unlocks.tsv";
++    std::ofstream out(tsv_path, std::ios::app);
++    if (!out.is_open()) return false;
++
++    out << unlock.username << '\t'
++        << unlock.game_id << '\t'
++        << unlock.achievement_id << '\t'
++        << unlock.game_hash << '\t'
++        << unlock.unlock_epoch_sec << '\n';
++
++    return true;
++}
++
++std::vector<PendingUnlock> load_pending_unlocks(const std::filesystem::path& cache_dir) {
++    std::lock_guard<std::mutex> lock(s_tsv_mutex);
++    return load_pending_unlocks_unlocked(cache_dir);
++}
++
++bool remove_pending_unlocks(const std::vector<uint32_t>& synced_achievement_ids,
++                            const std::string& username, uint32_t game_id,
++                            const std::filesystem::path& cache_dir) {
++    if (synced_achievement_ids.empty()) return true;
++    std::lock_guard<std::mutex> lock(s_tsv_mutex);
++
++    auto existing = load_pending_unlocks_unlocked(cache_dir);
++    std::unordered_set<uint32_t> to_remove(synced_achievement_ids.begin(), synced_achievement_ids.end());
++
++    std::vector<PendingUnlock> remaining;
++    for (const auto& e : existing) {
++        bool match = (username.empty() || iequals_ascii(e.username, username)) &&
++                     (game_id == 0 || e.game_id == game_id) &&
++                     (to_remove.find(e.achievement_id) != to_remove.end());
++        if (!match) {
++            remaining.push_back(e);
++        }
++    }
++
++    std::filesystem::path tsv_path = cache_dir / "pending_unlocks.tsv";
++    if (remaining.empty()) {
++        std::error_code ec;
++        std::filesystem::remove(tsv_path, ec);
++        return true;
++    }
++
++    std::ofstream out(tsv_path, std::ios::trunc);
++    if (!out.is_open()) return false;
++
++    for (const auto& r : remaining) {
++        out << r.username << '\t'
++            << r.game_id << '\t'
++            << r.achievement_id << '\t'
++            << r.game_hash << '\t'
++            << r.unlock_epoch_sec << '\n';
++    }
++    return true;
++}
++
++size_t get_pending_unlock_count(const std::filesystem::path& cache_dir) {
++    return load_pending_unlocks(cache_dir).size();
++}
++
++bool record_synced_unlocks_to_startsession(const std::string& username, uint32_t game_id,
++                                           const std::vector<uint32_t>& synced_achievement_ids,
++                                           const std::filesystem::path& cache_dir) {
++    if (username.empty() || game_id == 0 || synced_achievement_ids.empty()) {
++        return false;
++    }
++    std::filesystem::path target_file = cache_dir /
++        ("startsession_" + sanitize_user_key(username) + "_" + std::to_string(game_id) + ".json");
++
++    std::error_code ec;
++    if (!std::filesystem::exists(target_file, ec)) {
++        return false;
++    }
++
++    std::ifstream in(target_file, std::ios::binary | std::ios::ate);
++    if (!in.is_open()) return false;
++    auto sz = in.tellg();
++    if (sz <= 0) return false;
++    std::string content(static_cast<size_t>(sz), '\0');
++    in.seekg(0, std::ios::beg);
++    in.read(&content[0], sz);
++    in.close();
++
++    std::vector<PendingUnlock> dummy_pending;
++    uint64_t now = static_cast<uint64_t>(std::time(nullptr));
++    for (uint32_t id : synced_achievement_ids) {
++        PendingUnlock p;
++        p.username = username;
++        p.game_id = game_id;
++        p.achievement_id = id;
++        p.unlock_epoch_sec = now;
++        dummy_pending.push_back(p);
++    }
++
++    std::string merged = merge_start_session_unlocks(content, dummy_pending);
++    std::ofstream out(target_file, std::ios::binary | std::ios::trunc);
++    if (!out.is_open()) return false;
++    out.write(merged.data(), merged.size());
++    return true;
++}
++
++} // namespace snp::handheld
+diff --git a/src/handheld/ra_offline_cache.h b/src/handheld/ra_offline_cache.h
+new file mode 100644
+index 0000000..bd46217
+--- /dev/null
++++ b/src/handheld/ra_offline_cache.h
+@@ -0,0 +1,46 @@
++#pragma once
++
++#include <cstdint>
++#include <filesystem>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++namespace snp::handheld {
++
++struct PendingUnlock {
++    std::string username;
++    uint32_t game_id = 0;
++    uint32_t achievement_id = 0;
++    std::string game_hash;
++    uint64_t unlock_epoch_sec = 0;
++};
++
++std::string url_decode(const std::string& in);
++std::unordered_map<std::string, std::string> parse_url_params(const std::string& query_or_post_data);
++std::string sanitize_filename(const std::string& in);
++
++std::filesystem::path get_default_ra_cache_dir();
++
++bool cache_online_response(const std::string& post_data, const std::string& response_body,
++                           const std::filesystem::path& cache_dir = get_default_ra_cache_dir());
++
++bool try_serve_offline_response(const std::string& post_data, std::string& out_body, int& out_status,
++                                const std::filesystem::path& cache_dir = get_default_ra_cache_dir());
++
++bool queue_pending_unlock(const PendingUnlock& unlock,
++                          const std::filesystem::path& cache_dir = get_default_ra_cache_dir());
++std::vector<PendingUnlock> load_pending_unlocks(const std::filesystem::path& cache_dir = get_default_ra_cache_dir());
++bool remove_pending_unlocks(const std::vector<uint32_t>& synced_achievement_ids,
++                            const std::string& username, uint32_t game_id,
++                            const std::filesystem::path& cache_dir = get_default_ra_cache_dir());
++size_t get_pending_unlock_count(const std::filesystem::path& cache_dir = get_default_ra_cache_dir());
++
++std::string merge_start_session_unlocks(const std::string& original_json,
++                                        const std::vector<PendingUnlock>& pending_for_game);
++
++bool record_synced_unlocks_to_startsession(const std::string& username, uint32_t game_id,
++                                           const std::vector<uint32_t>& synced_achievement_ids,
++                                           const std::filesystem::path& cache_dir = get_default_ra_cache_dir());
++
++} // namespace snp::handheld
 diff --git a/src/handheld/rom_loader.cpp b/src/handheld/rom_loader.cpp
 new file mode 100644
-index 0000000..98ee3a5
+index 0000000..becb0cb
 --- /dev/null
 +++ b/src/handheld/rom_loader.cpp
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,149 @@
 +#include "rom_loader.h"
 +
 +#include <algorithm>
@@ -8075,7 +10622,22 @@ index 0000000..98ee3a5
 +    return search_dirs;
 +}
 +
++std::filesystem::path s_selected_rom_path;
++
++void store_selected_path(const std::filesystem::path& config_dir, const std::string& game_id, const std::filesystem::path& fallback_path) {
++    std::filesystem::path stored = config_dir / (game_id + ".z64");
++    if (std::filesystem::exists(stored)) {
++        s_selected_rom_path = stored;
++    } else {
++        s_selected_rom_path = fallback_path;
++    }
++}
++
 +} // namespace
++
++std::filesystem::path get_selected_rom_path() {
++    return s_selected_rom_path;
++}
 +
 +std::string find_and_select_rom() {
 +    const std::filesystem::path config_dir = recomp::get_config_path();
@@ -8097,9 +10659,10 @@ index 0000000..98ee3a5
 +    recomp::check_all_stored_roms();
 +
 +    if (recomp::is_rom_valid(game_id_priority[0])) {
-+        std::cout << "Using verified stored ROM ("
-+                  << reinterpret_cast<const char*>(game_id_priority[0].c_str()) << ")\n";
-+        return std::string(reinterpret_cast<const char*>(game_id_priority[0].c_str()));
++        std::string selected_id = reinterpret_cast<const char*>(game_id_priority[0].c_str());
++        std::cout << "Using verified stored ROM (" << selected_id << ")\n";
++        store_selected_path(config_dir, selected_id, {});
++        return selected_id;
 +    }
 +
 +    std::vector<std::filesystem::path> candidate_dirs = get_candidate_search_dirs();
@@ -8118,14 +10681,16 @@ index 0000000..98ee3a5
 +        for (const auto& raw_path : candidate_files) {
 +            auto err = recomp::select_rom(raw_path, game_id_priority[0]);
 +            if (err == recomp::RomValidationError::Good) {
-+                std::cout << "Selected ROM: " << raw_path << " ("
-+                          << reinterpret_cast<const char*>(game_id_priority[0].c_str()) << ")\n";
-+                return std::string(reinterpret_cast<const char*>(game_id_priority[0].c_str()));
++                std::string selected_id = reinterpret_cast<const char*>(game_id_priority[0].c_str());
++                std::cout << "Selected ROM: " << raw_path << " (" << selected_id << ")\n";
++                store_selected_path(config_dir, selected_id, raw_path);
++                return selected_id;
 +            }
 +        }
-+        std::cout << "Using verified stored ROM ("
-+                  << reinterpret_cast<const char*>(game_id_priority[1].c_str()) << ")\n";
-+        return std::string(reinterpret_cast<const char*>(game_id_priority[1].c_str()));
++        std::string selected_id = reinterpret_cast<const char*>(game_id_priority[1].c_str());
++        std::cout << "Using verified stored ROM (" << selected_id << ")\n";
++        store_selected_path(config_dir, selected_id, {});
++        return selected_id;
 +    }
 +
 +    if (candidate_files.empty()) {
@@ -8138,9 +10703,10 @@ index 0000000..98ee3a5
 +        for (const auto& game_id : game_id_priority) {
 +            auto err = recomp::select_rom(raw_path, game_id);
 +            if (err == recomp::RomValidationError::Good) {
-+                std::cout << "Selected ROM: " << raw_path << " ("
-+                          << reinterpret_cast<const char*>(game_id.c_str()) << ")\n";
-+                return std::string(reinterpret_cast<const char*>(game_id.c_str()));
++                std::string selected_id = reinterpret_cast<const char*>(game_id.c_str());
++                std::cout << "Selected ROM: " << raw_path << " (" << selected_id << ")\n";
++                store_selected_path(config_dir, selected_id, raw_path);
++                return selected_id;
 +            }
 +        }
 +    }
@@ -8152,10 +10718,10 @@ index 0000000..98ee3a5
 +} // namespace snp::handheld
 diff --git a/src/handheld/rom_loader.h b/src/handheld/rom_loader.h
 new file mode 100644
-index 0000000..f89dca2
+index 0000000..fe78b40
 --- /dev/null
 +++ b/src/handheld/rom_loader.h
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,16 @@
 +#pragma once
 +
 +#include <filesystem>
@@ -8169,13 +10735,15 @@ index 0000000..f89dca2
 +// Returns empty string if no valid ROM was found.
 +std::string find_and_select_rom();
 +
++std::filesystem::path get_selected_rom_path();
++
 +} // namespace snp::handheld
 diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
 new file mode 100644
-index 0000000..15e70cd
+index 0000000..167bb75
 --- /dev/null
 +++ b/tests/CMakeLists.txt
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,104 @@
 +cmake_minimum_required(VERSION 3.20)
 +project(test_gles3_renderer LANGUAGES C CXX)
 +
@@ -8219,6 +10787,66 @@ index 0000000..15e70cd
 +target_include_directories(test_snp_patch PRIVATE
 +    ${CMAKE_CURRENT_SOURCE_DIR}/../tools
 +)
++
++file(GLOB RCHEEVOS_TEST_SOURCES CONFIGURE_DEPENDS
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/api/*.c
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/client/*.c
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/hash/*.c
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/runtime/*.c
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src/util/*.c
++)
++
++file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/miniz_export.h
++    "#pragma once\n#define MINIZ_EXPORT\n#define MINIZ_NO_EXPORT\n"
++)
++
++file(GLOB MINIZ_TEST_SOURCES CONFIGURE_DEPENDS
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/miniz/*.c
++)
++
++add_executable(test_ra_client
++    test_ra_client.cpp
++    ../src/handheld/ra_credentials.cpp
++    ../src/handheld/ra_offline_cache.cpp
++    ../src/handheld/png_decode.cpp
++    ../src/handheld/ra_client.cpp
++    ../src/handheld/handheld_config.cpp
++    ../src/handheld/rom_loader.cpp
++    ${MINIZ_TEST_SOURCES}
++    ${RCHEEVOS_TEST_SOURCES}
++)
++
++target_include_directories(test_ra_client PRIVATE
++    ${CMAKE_CURRENT_BINARY_DIR}
++    ${CMAKE_CURRENT_SOURCE_DIR}/../src/handheld
++    ${CMAKE_CURRENT_SOURCE_DIR}/../src/gles3
++    ${CMAKE_CURRENT_SOURCE_DIR}/../include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/rcheevos/src
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/miniz
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/concurrentqueue
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/thirdparty/sse2neon
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/N64Recomp/include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/N64Recomp/lib/tomlplusplus/include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/librecomp/include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include
++    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/N64ModernRuntime/ultramodern/include/ultramodern
++    ${SDL2_INCLUDE_DIRS}
++)
++
++target_compile_definitions(test_ra_client PRIVATE
++    MINIZ_STATIC_DEFINE
++    RC_CLIENT_SUPPORTS_HASH
++    SNP_BACKEND_GLES3
++)
++
++target_link_libraries(test_ra_client PRIVATE
++    ${SDL2_LIBRARIES}
++    dl
++    pthread
++)
++
 +
 diff --git a/tests/test_gles3_renderer.cpp b/tests/test_gles3_renderer.cpp
 new file mode 100644
@@ -8958,6 +11586,651 @@ index 0000000..2bd6ef8
 +    SDL_Quit();
 +
 +    std::printf("[Test] ALL GLES3 RENDERER TESTS PASSED SUCCESSFULLY!\n");
++    return 0;
++}
+diff --git a/tests/test_ra_client.cpp b/tests/test_ra_client.cpp
+new file mode 100644
+index 0000000..d176e7d
+--- /dev/null
++++ b/tests/test_ra_client.cpp
+@@ -0,0 +1,639 @@
++#include <algorithm>
++#include <cassert>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <sstream>
++#include <vector>
++
++#include "handheld_config.h"
++#include "png_decode.h"
++#include "ra_client.h"
++#include "ra_credentials.h"
++#include "ra_offline_cache.h"
++#include "miniz.h"
++
++#include "librecomp/game.hpp"
++#include "rc_client.h"
++#include "rc_consoles.h"
++#include "rc_hash.h"
++#include "rc_runtime.h"
++#include "rc_api_user.h"
++#include "rc_api_runtime.h"
++
++namespace ultramodern {
++    void quit() {}
++    namespace renderer {
++        void set_graphics_config(const GraphicsConfig&) {}
++    }
++}
++
++namespace snp::gles3 {
++    void set_vsync_enabled(bool) {}
++}
++
++namespace recomp {
++    std::filesystem::path get_config_path() {
++        return ".";
++    }
++    void check_all_stored_roms() {}
++    bool is_rom_valid(const std::u8string&) {
++        return false;
++    }
++    RomValidationError select_rom(const std::filesystem::path&, const std::u8string&) {
++        return RomValidationError::OtherError;
++    }
++}
++
++namespace {
++
++void write_png_chunk(std::vector<uint8_t>& out, const char type[4], const uint8_t* data, size_t length) {
++    uint8_t len_bytes[4] = {
++        static_cast<uint8_t>((length >> 24) & 0xFF),
++        static_cast<uint8_t>((length >> 16) & 0xFF),
++        static_cast<uint8_t>((length >> 8) & 0xFF),
++        static_cast<uint8_t>(length & 0xFF)
++    };
++    out.insert(out.end(), len_bytes, len_bytes + 4);
++    out.insert(out.end(), type, type + 4);
++    if (data && length > 0) {
++        out.insert(out.end(), data, data + length);
++    }
++    uint32_t crc = mz_crc32(0, reinterpret_cast<const unsigned char*>(type), 4);
++    if (data && length > 0) {
++        crc = mz_crc32(crc, data, length);
++    }
++    uint8_t crc_bytes[4] = {
++        static_cast<uint8_t>((crc >> 24) & 0xFF),
++        static_cast<uint8_t>((crc >> 16) & 0xFF),
++        static_cast<uint8_t>((crc >> 8) & 0xFF),
++        static_cast<uint8_t>(crc & 0xFF)
++    };
++    out.insert(out.end(), crc_bytes, crc_bytes + 4);
++}
++
++std::vector<uint8_t> create_test_rgba_png() {
++    std::vector<uint8_t> png = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
++
++    uint8_t ihdr[13] = {
++        0, 0, 0, 2, // width = 2
++        0, 0, 0, 2, // height = 2
++        8,          // bit depth = 8
++        6,          // color type = 6 (RGBA)
++        0, 0, 0     // compression, filter, interlace
++    };
++    write_png_chunk(png, "IHDR", ihdr, sizeof(ihdr));
++
++    std::vector<uint8_t> raw_scanlines;
++    // Row 0: filter=0, pixel(0,0)=red, pixel(1,0)=green
++    raw_scanlines.push_back(0);
++    raw_scanlines.insert(raw_scanlines.end(), {255, 0, 0, 255});
++    raw_scanlines.insert(raw_scanlines.end(), {0, 255, 0, 255});
++
++    // Row 1: filter=0, pixel(0,1)=blue, pixel(1,1)=yellow半透明
++    raw_scanlines.push_back(0);
++    raw_scanlines.insert(raw_scanlines.end(), {0, 0, 255, 255});
++    raw_scanlines.insert(raw_scanlines.end(), {255, 255, 0, 128});
++
++    uLong compressed_len = compressBound(static_cast<uLong>(raw_scanlines.size()));
++    std::vector<uint8_t> compressed(compressed_len);
++    int res = compress(compressed.data(), &compressed_len, raw_scanlines.data(), static_cast<uLong>(raw_scanlines.size()));
++    assert(res == Z_OK);
++    compressed.resize(compressed_len);
++
++    write_png_chunk(png, "IDAT", compressed.data(), compressed.size());
++    write_png_chunk(png, "IEND", nullptr, 0);
++
++    return png;
++}
++
++std::vector<uint8_t> create_test_indexed_png() {
++    std::vector<uint8_t> png = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
++
++    uint8_t ihdr[13] = {
++        0, 0, 0, 2, // width = 2
++        0, 0, 0, 2, // height = 2
++        8,          // bit depth = 8
++        3,          // color type = 3 (Indexed PLTE)
++        0, 0, 0
++    };
++    write_png_chunk(png, "IHDR", ihdr, sizeof(ihdr));
++
++    uint8_t plte[12] = {
++        255, 0, 0,     // 0: Red
++        0, 255, 0,     // 1: Green
++        0, 0, 255,     // 2: Blue
++        255, 255, 255  // 3: White
++    };
++    write_png_chunk(png, "PLTE", plte, sizeof(plte));
++
++    uint8_t trns[4] = {255, 200, 100, 50};
++    write_png_chunk(png, "tRNS", trns, sizeof(trns));
++
++    std::vector<uint8_t> raw_scanlines;
++    // Row 0: filter=0, pixel(0,0)=0, pixel(1,0)=1
++    raw_scanlines.push_back(0);
++    raw_scanlines.push_back(0);
++    raw_scanlines.push_back(1);
++
++    // Row 1: filter=0, pixel(0,1)=2, pixel(1,1)=3
++    raw_scanlines.push_back(0);
++    raw_scanlines.push_back(2);
++    raw_scanlines.push_back(3);
++
++    uLong compressed_len = compressBound(static_cast<uLong>(raw_scanlines.size()));
++    std::vector<uint8_t> compressed(compressed_len);
++    int res = compress(compressed.data(), &compressed_len, raw_scanlines.data(), static_cast<uLong>(raw_scanlines.size()));
++    assert(res == Z_OK);
++    compressed.resize(compressed_len);
++
++    write_png_chunk(png, "IDAT", compressed.data(), compressed.size());
++    write_png_chunk(png, "IEND", nullptr, 0);
++
++    return png;
++}
++
++void test_nextui_credentials_parsing_and_discovery() {
++    std::printf("[TEST] Running NextUI credentials parsing and directory discovery...\n");
++
++    // Case 1: Standard raUsername + raToken
++    {
++        std::istringstream stream("raUsername=alice\nraToken=token123\n");
++        auto creds = snp::handheld::parse_nextui_ra_settings(stream);
++        assert(creds.username == "alice");
++        assert(creds.token == "token123");
++        assert(creds.password.empty());
++        assert(creds.has_login());
++    }
++
++    // Case 2: raServerUsername takes priority when raToken is present (renamed accounts)
++    {
++        std::istringstream stream("raUsername=alice_local\r\nraServerUsername=alice_renamed\r\nraToken=token456\r\n");
++        auto creds = snp::handheld::parse_nextui_ra_settings(stream);
++        assert(creds.username == "alice_renamed");
++        assert(creds.token == "token456");
++        assert(creds.has_login());
++    }
++
++    // Case 3: Empty token with raPassword fallback
++    {
++        std::istringstream stream("raUsername=bob\nraToken=\nraPassword=pass789\n");
++        auto creds = snp::handheld::parse_nextui_ra_settings(stream);
++        assert(creds.username == "bob");
++        assert(creds.token.empty());
++        assert(creds.password == "pass789");
++        assert(creds.has_login());
++    }
++
++    // Directory discovery: walk up ancestor directories
++    {
++        std::filesystem::path root_temp = std::filesystem::current_path() / "build_test_ra_tmp";
++        std::filesystem::path deep_dir = root_temp / "sub1" / "sub2" / "sub3" / "sub4";
++        std::filesystem::path settings_dir = root_temp / ".userdata" / "shared";
++
++        std::filesystem::create_directories(deep_dir);
++        std::filesystem::create_directories(settings_dir);
++
++        std::ofstream out(settings_dir / "minuisettings.txt");
++        out << "raUsername=charlie\nraToken=chartok\n";
++        out.close();
++
++        snp::handheld::RetroAchievementsConfig cfg;
++        cfg.enabled = true;
++        cfg.import_system_credentials = true;
++
++        auto discovered = snp::handheld::discover_ra_credentials(cfg, deep_dir);
++        assert(discovered.username == "charlie");
++        assert(discovered.token == "chartok");
++
++        std::error_code ec;
++        std::filesystem::remove_all(root_temp, ec);
++    }
++
++    std::printf("[PASS] NextUI credentials parsing and discovery verified.\n");
++}
++
++void test_retroarch_credentials_parsing() {
++    std::printf("[TEST] Running RetroArch retroarch.cfg parsing...\n");
++
++    // Quoted values and interspersed settings
++    {
++        std::istringstream stream(
++            "# RetroArch config file\n"
++            "video_driver = \"gl\"\n"
++            "cheevos_username = \"retro_user\"\n"
++            "cheevos_token = \"retro_token\"\n"
++            "cheevos_password = \"secret_pw\"\n"
++        );
++        auto creds = snp::handheld::parse_retroarch_ra_cfg(stream);
++        assert(creds.username == "retro_user");
++        assert(creds.token == "retro_token");
++        assert(creds.password == "secret_pw");
++        assert(creds.has_login());
++    }
++
++    // Unquoted values and single quotes
++    {
++        std::istringstream stream(
++            "cheevos_username = unquoted_user\n"
++            "cheevos_token = 'single_quote_tok'\n"
++        );
++        auto creds = snp::handheld::parse_retroarch_ra_cfg(stream);
++        assert(creds.username == "unquoted_user");
++        assert(creds.token == "single_quote_tok");
++        assert(creds.password.empty());
++        assert(creds.has_login());
++    }
++
++    std::printf("[PASS] RetroArch config parsing verified.\n");
++}
++
++static std::vector<uint32_t> s_triggered_ids;
++void runtime_event_handler(const rc_runtime_event_t* runtime_event) {
++    if (runtime_event && runtime_event->type == RC_RUNTIME_EVENT_ACHIEVEMENT_TRIGGERED) {
++        s_triggered_ids.push_back(runtime_event->id);
++    }
++}
++
++uint32_t runtime_read_memory(uint32_t address, uint8_t* buffer, uint32_t num_bytes, void* ud) {
++    const uint8_t* rdram = static_cast<const uint8_t*>(ud);
++    return snp::handheld::ra_read_n64_memory(rdram, address, buffer, num_bytes);
++}
++
++void test_ra_memory_and_runtime_triggers() {
++    std::printf("[TEST] Running N64 memory alignment & live rc_runtime_t triggers...\n");
++
++    std::vector<uint8_t> rdram(8 * 1024 * 1024, 0);
++
++    // Write via N64 semantics into host RDRAM
++    // N64 byte 0x80001000 -> host offset 0x1000 ^ 3 = 0x1003
++    rdram[0x1000 ^ 3] = 0x5A; // 90
++    // N64 halfword 0x80001004 -> host offset 0x1004 ^ 2 = 0x1006
++    *reinterpret_cast<uint16_t*>(rdram.data() + (0x1004 ^ 2)) = 0xBEEF; // 48879
++    // N64 word 0x80001008 -> host offset 0x1008
++    *reinterpret_cast<uint32_t*>(rdram.data() + 0x1008) = 0x12345678; // 305419896
++
++    uint8_t buf[8]{};
++
++    // 8-bit read: matches mupen64plus address 0x1003
++    uint32_t r1 = snp::handheld::ra_read_n64_memory(rdram.data(), 0x1003, buf, 1);
++    assert(r1 == 1 && buf[0] == 0x5A);
++
++    // 16-bit read: matches mupen64plus address 0x1006
++    uint32_t r2 = snp::handheld::ra_read_n64_memory(rdram.data(), 0x1006, buf, 2);
++    assert(r2 == 2 && *reinterpret_cast<uint16_t*>(buf) == 0xBEEF);
++
++    // 32-bit read: matches mupen64plus address 0x1008
++    uint32_t r4 = snp::handheld::ra_read_n64_memory(rdram.data(), 0x1008, buf, 4);
++    assert(r4 == 4 && *reinterpret_cast<uint32_t*>(buf) == 0x12345678);
++
++    // Out-of-bounds clamping
++    assert(snp::handheld::ra_read_n64_memory(rdram.data(), 0x800000, buf, 4) == 0);
++    assert(snp::handheld::ra_read_n64_memory(rdram.data(), 0x7FFFFF, buf, 4) == 1);
++    assert(snp::handheld::ra_read_n64_memory(nullptr, 0, buf, 4) == 0);
++
++    // Live rc_runtime_t trigger evaluation with exact mupen64plus addresses.
++    // rcheevos starts newly activated achievements in WAITING state until they evaluate false once.
++    std::fill(rdram.begin(), rdram.end(), 0);
++    rc_runtime_t runtime;
++    rc_runtime_init(&runtime);
++
++    int act1 = rc_runtime_activate_achievement(&runtime, 101, "0xH001003=90", nullptr, 0);
++    int act2 = rc_runtime_activate_achievement(&runtime, 102, "0x 001006=48879", nullptr, 0);
++    int act3 = rc_runtime_activate_achievement(&runtime, 103, "0xX001008=305419896", nullptr, 0);
++    assert(act1 == RC_OK && act2 == RC_OK && act3 == RC_OK);
++
++    s_triggered_ids.clear();
++    rc_runtime_do_frame(&runtime, runtime_event_handler, runtime_read_memory, rdram.data(), nullptr);
++    assert(s_triggered_ids.empty());
++
++    rdram[0x1000 ^ 3] = 0x5A;
++    *reinterpret_cast<uint16_t*>(rdram.data() + (0x1004 ^ 2)) = 0xBEEF;
++    *reinterpret_cast<uint32_t*>(rdram.data() + 0x1008) = 0x12345678;
++
++    rc_runtime_do_frame(&runtime, runtime_event_handler, runtime_read_memory, rdram.data(), nullptr);
++
++    assert(s_triggered_ids.size() == 3);
++    std::sort(s_triggered_ids.begin(), s_triggered_ids.end());
++    assert(s_triggered_ids[0] == 101);
++    assert(s_triggered_ids[1] == 102);
++    assert(s_triggered_ids[2] == 103);
++
++    rc_runtime_destroy(&runtime);
++    std::printf("[PASS] N64 memory alignment & live runtime triggers verified.\n");
++}
++
++void test_png_decoder() {
++    std::printf("[TEST] Running PNG decoder on synthetic RGBA & indexed images...\n");
++
++    // 1. Valid RGBA PNG
++    {
++        auto rgba_png = create_test_rgba_png();
++        snp::handheld::DecodedImage img;
++        bool ok = snp::handheld::decode_png(rgba_png.data(), rgba_png.size(), img);
++        assert(ok);
++        assert(img.width == 2);
++        assert(img.height == 2);
++        assert(img.rgba.size() == 16);
++
++        // Pixel (0,0): Red (255, 0, 0, 255)
++        assert(img.rgba[0] == 255 && img.rgba[1] == 0 && img.rgba[2] == 0 && img.rgba[3] == 255);
++        // Pixel (1,0): Green (0, 255, 0, 255)
++        assert(img.rgba[4] == 0 && img.rgba[5] == 255 && img.rgba[6] == 0 && img.rgba[7] == 255);
++        // Pixel (0,1): Blue (0, 0, 255, 255)
++        assert(img.rgba[8] == 0 && img.rgba[9] == 0 && img.rgba[10] == 255 && img.rgba[11] == 255);
++        // Pixel (1,1): Yellow (255, 255, 0, 128)
++        assert(img.rgba[12] == 255 && img.rgba[13] == 255 && img.rgba[14] == 0 && img.rgba[15] == 128);
++    }
++
++    // 2. Valid Indexed PNG with PLTE and tRNS
++    {
++        auto indexed_png = create_test_indexed_png();
++        snp::handheld::DecodedImage img;
++        bool ok = snp::handheld::decode_png(indexed_png.data(), indexed_png.size(), img);
++        assert(ok);
++        assert(img.width == 2);
++        assert(img.height == 2);
++        assert(img.rgba.size() == 16);
++
++        // Pixel 0: palette 0 (Red), alpha 255
++        assert(img.rgba[0] == 255 && img.rgba[1] == 0 && img.rgba[2] == 0 && img.rgba[3] == 255);
++        // Pixel 1: palette 1 (Green), alpha 200
++        assert(img.rgba[4] == 0 && img.rgba[5] == 255 && img.rgba[6] == 0 && img.rgba[7] == 200);
++        // Pixel 2: palette 2 (Blue), alpha 100
++        assert(img.rgba[8] == 0 && img.rgba[9] == 0 && img.rgba[10] == 255 && img.rgba[11] == 100);
++        // Pixel 3: palette 3 (White), alpha 50
++        assert(img.rgba[12] == 255 && img.rgba[13] == 255 && img.rgba[14] == 255 && img.rgba[15] == 50);
++    }
++
++    // 3. Corrupt buffer rejection
++    {
++        snp::handheld::DecodedImage img;
++        assert(!snp::handheld::decode_png(nullptr, 0, img));
++
++        uint8_t bad_sig[16] = {0, 1, 2, 3, 4, 5, 6, 7};
++        assert(!snp::handheld::decode_png(bad_sig, sizeof(bad_sig), img));
++
++        auto valid = create_test_rgba_png();
++        // Truncate in the middle
++        assert(!snp::handheld::decode_png(valid.data(), valid.size() / 2, img));
++
++        // Corrupt IHDR bit depth
++        auto corrupted = valid;
++        corrupted[16 + 8] = 16;
++        assert(!snp::handheld::decode_png(corrupted.data(), corrupted.size(), img));
++    }
++
++    std::printf("[PASS] PNG decoder tests verified.\n");
++}
++
++void test_rcheevos_n64_hash() {
++    std::printf("[TEST] Running rcheevos N64 hash generation...\n");
++
++    std::vector<uint8_t> mock_n64_rom(4096 * 2, 0);
++    mock_n64_rom[0] = 0x80;
++    mock_n64_rom[1] = 0x37;
++    mock_n64_rom[2] = 0x12;
++    mock_n64_rom[3] = 0x40;
++
++    char hash[33]{};
++    int res = rc_hash_generate_from_buffer(hash, RC_CONSOLE_NINTENDO_64, mock_n64_rom.data(), mock_n64_rom.size());
++    assert(res != 0);
++    assert(std::strlen(hash) == 32);
++
++    std::printf("[PASS] rcheevos N64 MD5 hash generated: %s\n", hash);
++}
++
++void test_url_params_parsing_and_decoding() {
++    std::printf("[TEST] Running URL param parsing and decoding...\n");
++
++    std::string post_data = "r=login2&u=alice%2Bplus&p=pass%20word&t=tok%3D123";
++    auto params = snp::handheld::parse_url_params(post_data);
++    assert(params["r"] == "login2");
++    assert(params["u"] == "alice+plus");
++    assert(params["p"] == "pass word");
++    assert(params["t"] == "tok=123");
++
++    std::string decoded_plus = snp::handheld::url_decode("a+b+c%21");
++    assert(decoded_plus == "a b c!");
++
++    std::printf("[PASS] URL param parsing and decoding verified.\n");
++}
++
++void test_offline_caching_and_fallback() {
++    std::printf("[TEST] Running offline caching and fallback...\n");
++
++    std::filesystem::path test_dir = std::filesystem::current_path() / "build_test_cache_tmp";
++    std::error_code ec;
++    std::filesystem::remove_all(test_dir, ec);
++    std::filesystem::create_directories(test_dir, ec);
++
++    // Cache login2
++    bool ok_log = snp::handheld::cache_online_response(
++        "r=login2&u=tester&t=tok",
++        "{\"Success\":true,\"User\":\"tester\",\"Token\":\"tok123\"}",
++        test_dir);
++    assert(ok_log);
++    assert(std::filesystem::exists(test_dir / "login_tester.json"));
++
++    // Check permissions on login_tester.json (0600)
++    auto perms = std::filesystem::status(test_dir / "login_tester.json").permissions();
++    assert((perms & std::filesystem::perms::owner_read) != std::filesystem::perms::none);
++    assert((perms & std::filesystem::perms::owner_write) != std::filesystem::perms::none);
++
++    // Cache gameid
++    bool ok_gid = snp::handheld::cache_online_response(
++        "r=gameid&m=md5hash",
++        "{\"Success\":true,\"GameID\":2345}",
++        test_dir);
++    assert(ok_gid);
++    assert(std::filesystem::exists(test_dir / "gameid_md5hash.json"));
++
++    // Cache patch
++    bool ok_patch = snp::handheld::cache_online_response(
++        "r=patch&g=2345",
++        "{\"Success\":true,\"PatchData\":[]}",
++        test_dir);
++    assert(ok_patch);
++    assert(std::filesystem::exists(test_dir / "patch_2345.json"));
++
++    // Cache achievementsets
++    bool ok_sets = snp::handheld::cache_online_response(
++        "r=achievementsets&g=2345",
++        "{\"Success\":true,\"Sets\":[]}",
++        test_dir);
++    assert(ok_sets);
++    assert(std::filesystem::exists(test_dir / "achievementsets_2345.json"));
++
++    // Test offline serving
++    std::string body;
++    int status = 0;
++    bool served_login = snp::handheld::try_serve_offline_response("r=login2&u=tester", body, status, test_dir);
++    assert(served_login);
++    assert(status == 200);
++    assert(body.find("\"Token\":\"tok123\"") != std::string::npos);
++
++    bool served_case_insensitive = snp::handheld::try_serve_offline_response("r=login2&u=TeStEr", body, status, test_dir);
++    assert(served_case_insensitive);
++    assert(status == 200);
++
++    bool served_gameid = snp::handheld::try_serve_offline_response("r=gameid&m=md5hash", body, status, test_dir);
++    assert(served_gameid);
++    assert(status == 200);
++    assert(body.find("\"GameID\":2345") != std::string::npos);
++
++    // Unknown file
++    bool served_unknown = snp::handheld::try_serve_offline_response("r=gameid&m=unknown_hash", body, status, test_dir);
++    assert(!served_unknown);
++
++    std::filesystem::remove_all(test_dir, ec);
++    std::printf("[PASS] Offline caching and fallback verified.\n");
++}
++
++void test_startsession_merge_with_offline_unlocks() {
++    std::printf("[TEST] Running startsession merge with offline unlocks...\n");
++
++    std::string original = "{\"Success\":true,\"Unlocks\":[{\"ID\":101,\"When\":1700000000}],\"HardcoreUnlocks\":[],\"ServerNow\":1700050000}";
++
++    std::vector<snp::handheld::PendingUnlock> pending;
++    pending.push_back({ "alice", 1234, 102, "hash", 1700010000 });
++    pending.push_back({ "alice", 1234, 103, "hash", 1700020000 });
++    pending.push_back({ "alice", 1234, 101, "hash", 1700030000 });
++
++    std::string merged = snp::handheld::merge_start_session_unlocks(original, pending);
++
++    rc_api_start_session_response_t resp{};
++    rc_api_server_response_t server_resp{};
++    server_resp.body = merged.c_str();
++    server_resp.body_length = merged.size();
++
++    int res = rc_api_process_start_session_server_response(&resp, &server_resp);
++    assert(res == RC_OK);
++    assert(resp.response.succeeded == 1);
++    assert(resp.num_unlocks == 3);
++
++    bool found101 = false, found102 = false, found103 = false;
++    for (uint32_t i = 0; i < resp.num_unlocks; ++i) {
++        if (resp.unlocks[i].achievement_id == 101) found101 = true;
++        if (resp.unlocks[i].achievement_id == 102) found102 = true;
++        if (resp.unlocks[i].achievement_id == 103) found103 = true;
++    }
++    assert(found101 && found102 && found103);
++    rc_api_destroy_start_session_response(&resp);
++
++    std::printf("[PASS] Startsession merge verified.\n");
++}
++
++void test_pending_unlock_queue_and_sync() {
++    std::printf("[TEST] Running pending unlock queue, timestamp clamping, and award request...\n");
++
++    std::filesystem::path test_dir = std::filesystem::current_path() / "build_test_queue_tmp";
++    std::error_code ec;
++    std::filesystem::remove_all(test_dir, ec);
++    std::filesystem::create_directories(test_dir, ec);
++
++    snp::handheld::PendingUnlock u1{ "bob", 999, 401, "fake_hash", 1705000000 };
++    assert(snp::handheld::queue_pending_unlock(u1, test_dir));
++
++    assert(snp::handheld::queue_pending_unlock(u1, test_dir));
++    assert(snp::handheld::get_pending_unlock_count(test_dir) == 1);
++
++    uint64_t bad_rtc_time = 1200000;
++    uint64_t clamped = (bad_rtc_time >= 1700000000ULL) ? bad_rtc_time : 0;
++    assert(clamped == 0);
++
++    snp::handheld::PendingUnlock u2{ "bob", 999, 402, "fake_hash", clamped };
++    assert(snp::handheld::queue_pending_unlock(u2, test_dir));
++    assert(snp::handheld::get_pending_unlock_count(test_dir) == 2);
++
++    auto list = snp::handheld::load_pending_unlocks(test_dir);
++    assert(list.size() == 2);
++    assert(list[0].achievement_id == 401 && list[0].unlock_epoch_sec == 1705000000);
++    assert(list[1].achievement_id == 402 && list[1].unlock_epoch_sec == 0);
++
++    uint64_t now_sec = 1705000060;
++    uint32_t seconds_since_unlock = static_cast<uint32_t>(now_sec - list[0].unlock_epoch_sec);
++    assert(seconds_since_unlock == 60);
++
++    rc_api_award_achievement_request_t req{};
++    req.username = list[0].username.c_str();
++    req.api_token = "my_api_tok";
++    req.achievement_id = list[0].achievement_id;
++    req.hardcore = 0;
++    req.game_hash = list[0].game_hash.c_str();
++    req.seconds_since_unlock = seconds_since_unlock;
++
++    rc_api_request_t api_req{};
++    int res = rc_api_init_award_achievement_request(&api_req, &req);
++    assert(res == RC_OK);
++    assert(api_req.post_data != nullptr);
++    std::string post_str = api_req.post_data;
++    assert(post_str.find("r=awardachievement") != std::string::npos);
++    assert(post_str.find("a=401") != std::string::npos);
++    assert(post_str.find("o=60") != std::string::npos);
++    assert(post_str.find("v=") != std::string::npos);
++    rc_api_destroy_request(&api_req);
++
++    assert(snp::handheld::remove_pending_unlocks({ 401 }, "bob", 999, test_dir));
++    assert(snp::handheld::get_pending_unlock_count(test_dir) == 1);
++    auto remaining = snp::handheld::load_pending_unlocks(test_dir);
++    assert(remaining.size() == 1);
++    assert(remaining[0].achievement_id == 402);
++
++    std::filesystem::remove_all(test_dir, ec);
++    std::printf("[PASS] Pending unlock queue and request generation verified.\n");
++}
++
++void test_config_roundtrip_and_partial_toml() {
++    std::printf("[TEST] Running snprecomp.toml round-trip and partial key safety...\n");
++
++    std::filesystem::path cfg_path = std::filesystem::current_path() / "build_test_snprecomp.toml";
++    std::error_code ec;
++    std::filesystem::remove(cfg_path, ec);
++
++    // First load writes default config (omitting empty password key)
++    assert(snp::handheld::load_config(cfg_path.string()));
++    // Second load parses the saved file where password key is absent
++    assert(snp::handheld::load_config(cfg_path.string()));
++    assert(snp::handheld::get_config().retroachievements.enabled);
++    assert(snp::handheld::get_config().retroachievements.password.empty());
++
++    // Partial TOML with only 1 key in [video] and [retroachievements]
++    {
++        std::ofstream out(cfg_path, std::ios::trunc);
++        out << "[video]\naspect_ratio = \"expand\"\n[retroachievements]\nusername = \"partial_user\"\n";
++    }
++    assert(snp::handheld::load_config(cfg_path.string()));
++    assert(snp::handheld::get_config().retroachievements.username == "partial_user");
++    assert(snp::handheld::get_config().retroachievements.token.empty());
++
++    std::filesystem::remove(cfg_path, ec);
++    std::printf("[PASS] snprecomp.toml round-trip and partial key safety verified.\n");
++}
++
++} // namespace
++
++int main() {
++    std::printf("========================================\n");
++    std::printf("Running RetroAchievements Test Suite\n");
++    std::printf("========================================\n");
++
++    test_nextui_credentials_parsing_and_discovery();
++    test_retroarch_credentials_parsing();
++    test_ra_memory_and_runtime_triggers();
++    test_png_decoder();
++    test_rcheevos_n64_hash();
++    test_url_params_parsing_and_decoding();
++    test_offline_caching_and_fallback();
++    test_startsession_merge_with_offline_unlocks();
++    test_pending_unlock_queue_and_sync();
++    test_config_roundtrip_and_partial_toml();
++
++    std::printf("========================================\n");
++    std::printf("All 10 test suites passed successfully!\n");
++    std::printf("========================================\n");
 +    return 0;
 +}
 diff --git a/tests/test_snp_patch.cpp b/tests/test_snp_patch.cpp

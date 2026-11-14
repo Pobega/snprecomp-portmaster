@@ -32,6 +32,7 @@ In `Expand` mode, the 3D camera frustum adapts dynamically to any handheld panel
   - Automatically switches to standard D-Pad / Left Stick + `A` (Confirm) / `B` (Back) navigation across front-end menus, file select, name entry, cutscenes, and in-stage pause menus.
   - Includes **Smart Lock-On**, smooth S-curve digital reticle ramping, 1-button dodge rolling, target cycling, and quick crosshair re-centering.
 - **In-Game Quick Settings Overlay (`Select` / `Menu`)**: Live configuration of control schemes (`Strafe + Shift`, `Bumper Strafe`, `Face Strafe`, `D-Pad Aim`, `D-Pad Strafe`, `Twin Stick`), face-button layout (`Nintendo` vs `Positional`), aspect ratio (`Expand` vs `Original 4:3`), resolution scale (`1x 240p` / `2x 480p`), VSync, rumble, volume, and persisted saves in `snprecomp.toml`.
+- **RetroAchievements (Softcore Mode & Offline Cache)**: Built-in achievement tracking powered by `rcheevos`. Automatically imports credentials from NextUI (`minuisettings.txt`) and RetroArch (`retroarch.cfg`) or `snprecomp.toml`. Full offline support caches game sets and badge art locally, queues achievements earned while offline (`pending_unlocks.tsv`) with RTC-safe timestamping, and provides automatic and manual sync (`Sync Achievements` button) in Quick Settings.
 
 ## Supported ROM Files
 

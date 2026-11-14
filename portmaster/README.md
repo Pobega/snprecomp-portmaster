@@ -8,6 +8,8 @@ On first boot, PortMaster verifies and normalizes your ROM, applies any optional
 
 First boot automatically selects `Stickless: Strafe + Shift` on stickless/single-stick handhelds and `Twin Stick` on dual-stick handhelds. Both `Hor+` widescreen (`3:2`, `16:9`, `16:10`) and `Vert+` square/tallscreen (`1:1` `720x720` RGB30 / RG CubeXX, `5:4`) aspect ratios are natively supported alongside `4:3 Original`, dynamically expanding 3D field-of-view, scissor boxes, and reticle reach without stretching or letterboxing. You can press `Select` or `Menu` at any time during gameplay to open the Quick Settings overlay and customize aspect ratios, control schemes, aiming curves, sensitivity, and graphics options.
 
+Optional RetroAchievements support (Softcore Mode) is included via `rcheevos`. Existing credentials from NextUI (`minuisettings.txt`) and RetroArch (`retroarch.cfg`) are automatically discovered and imported on boot, or can be specified in `snprecomp.toml`. Full offline caching allows playing and unlocking achievements without an active internet connection; earned unlocks are queued with RTC-safe timestamping and synchronized automatically or via the `Sync Achievements` Quick Settings row.
+
 ## Controls
 
 | Button | Action |
@@ -34,6 +36,7 @@ git clone --recursive https://github.com/wootbeer/snprecomp.git
 cd snprecomp
 git checkout 6e76c24c84e6fc65faeae89e8e75d7fac92aba1f
 git submodule update --init --recursive
+git clone --depth 1 https://github.com/RetroAchievements/rcheevos.git lib/rcheevos
 
 # Apply PortMaster GLES3 handheld patches
 git apply /path/to/patches/snprecomp-portmaster-gles3.patch
