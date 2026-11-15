@@ -126,6 +126,7 @@ constexpr int SNP_CURLOPT_URL = 10002;
 constexpr int SNP_CURLOPT_POSTFIELDS = 10015;
 constexpr int SNP_CURLOPT_USERAGENT = 10018;
 constexpr int SNP_CURLOPT_HTTPHEADER = 10023;
+constexpr int SNP_CURLOPT_CAINFO = 10065;
 constexpr int SNP_CURLOPT_TIMEOUT = 13;
 constexpr int SNP_CURLOPT_FOLLOWLOCATION = 52;
 constexpr int SNP_CURLOPT_WRITEFUNCTION = 20011;
@@ -160,6 +161,37 @@ void init_libcurl() {
     }
 }
 
+const std::string& get_ca_bundle_path() {
+    static const std::string cached_path = []() -> std::string {
+        const char* env_vars[] = {"CURL_CA_BUNDLE", "SSL_CERT_FILE"};
+        for (const char* var : env_vars) {
+            const char* val = std::getenv(var);
+            if (val != nullptr && val[0] != '\0') {
+                std::error_code ec;
+                if (std::filesystem::is_regular_file(val, ec)) {
+                    return std::string(val);
+                }
+            }
+        }
+
+        const char* fallback_paths[] = {
+            "/etc/ssl/certs/ca-certificates.crt",
+            "/etc/pki/tls/certs/ca-bundle.crt",
+            "/etc/ssl/cert.pem",
+            "/mnt/SDCARD/Emus/tg5040/PORTS.pak/files/ca-certificates.crt",
+            "/mnt/SDCARD/Emus/tg5040/PORTS.pak/PortMaster/exlibs/certifi/cacert.pem",
+        };
+        for (const char* path : fallback_paths) {
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(path, ec)) {
+                return std::string(path);
+            }
+        }
+        return {};
+    }();
+    return cached_path;
+}
+
 bool execute_curl_dlopen(const HttpRequestTask& task, HttpResponseItem& item) {
     if (s_curl_easy_init == nullptr || s_curl_easy_setopt == nullptr ||
         s_curl_easy_perform == nullptr || s_curl_easy_getinfo == nullptr ||
@@ -181,6 +213,10 @@ bool execute_curl_dlopen(const HttpRequestTask& task, HttpResponseItem& item) {
 
     s_curl_easy_setopt(curl, SNP_CURLOPT_URL, task.url.c_str());
     s_curl_easy_setopt(curl, SNP_CURLOPT_USERAGENT, RA_USER_AGENT);
+    const std::string& ca_bundle = get_ca_bundle_path();
+    if (!ca_bundle.empty()) {
+        s_curl_easy_setopt(curl, SNP_CURLOPT_CAINFO, ca_bundle.c_str());
+    }
     s_curl_easy_setopt(curl, SNP_CURLOPT_TIMEOUT, 15L);
     s_curl_easy_setopt(curl, SNP_CURLOPT_FOLLOWLOCATION, 1L);
     s_curl_easy_setopt(curl, SNP_CURLOPT_WRITEFUNCTION, curl_write_cb);
@@ -207,6 +243,7 @@ bool execute_curl_dlopen(const HttpRequestTask& task, HttpResponseItem& item) {
 }
 
 bool execute_curl_fork(const HttpRequestTask& task, HttpResponseItem& item) {
+    const std::string& ca_bundle = get_ca_bundle_path();
     int pipefd[2];
     if (pipe(pipefd) != 0) {
         item.http_status_code = -1;
@@ -234,6 +271,10 @@ bool execute_curl_fork(const HttpRequestTask& task, HttpResponseItem& item) {
         args.push_back("15");
         args.push_back("-A");
         args.push_back(RA_USER_AGENT);
+        if (!ca_bundle.empty()) {
+            args.push_back("--cacert");
+            args.push_back(ca_bundle);
+        }
         args.push_back("-w");
         args.push_back("\n%{http_code}");
 

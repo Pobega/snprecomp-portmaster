@@ -26,6 +26,22 @@ export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 export SNP_ROM_DIR="$GAMEDIR/roms"
 export ANALOG_STICKS
 
+if [ -z "$SSL_CERT_FILE" ] && [ -z "$CURL_CA_BUNDLE" ]; then
+  for ca in \
+    /etc/ssl/certs/ca-certificates.crt \
+    /etc/pki/tls/certs/ca-bundle.crt \
+    /etc/ssl/cert.pem \
+    "${controlfolder}/files/ca-certificates.crt" \
+    "$(dirname "$controlfolder")/files/ca-certificates.crt" \
+    "${controlfolder}/exlibs/certifi/cacert.pem"; do
+    if [ -f "$ca" ]; then
+      export SSL_CERT_FILE="$ca"
+      export CURL_CA_BUNDLE="$ca"
+      break
+    fi
+  done
+fi
+
 shopt -s nullglob nocaseglob
 rom_files=("$GAMEDIR/roms/"*.{z64,n64,v64} "$GAMEDIR/"*.{z64,n64,v64})
 raw_user_patches=("$GAMEDIR/roms/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff} "$GAMEDIR/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff})
