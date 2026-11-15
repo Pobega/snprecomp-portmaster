@@ -34,6 +34,7 @@ constexpr const char* ROM_PREFERRED_JP = "jp";
 constexpr int DEFAULT_RESOLUTION_SCALE = 2;
 constexpr int DEFAULT_TARGET_FPS = 60;
 constexpr int DEFAULT_VOLUME = 100;
+constexpr int DEFAULT_RUMBLE_STRENGTH = 100;
 constexpr float DEFAULT_STICK_SENSITIVITY = 100.0f;
 constexpr float DEFAULT_DEADZONE = 0.15f;
 
@@ -61,6 +62,7 @@ struct ControlsSettings {
     float deadzone = DEFAULT_DEADZONE;
     bool analog_aim = true;
     bool rumble = true;
+    int rumble_strength = DEFAULT_RUMBLE_STRENGTH;
     bool swap_sticks = false;
 };
 

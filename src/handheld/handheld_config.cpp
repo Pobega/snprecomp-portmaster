@@ -98,6 +98,7 @@ void save_config(const std::string& config_path) {
         << "deadzone = " << g_config.controls.deadzone << "\n"
         << "analog_aim = " << (g_config.controls.analog_aim ? "true" : "false") << "\n"
         << "rumble = " << (g_config.controls.rumble ? "true" : "false") << "\n"
+        << "rumble_strength = " << g_config.controls.rumble_strength << "\n"
         << "swap_sticks = " << (g_config.controls.swap_sticks ? "true" : "false") << "\n\n"
         << "[cheats]\n"
         << "unlock_options = " << (g_config.cheats.unlock_options ? "true" : "false") << "\n"
@@ -162,6 +163,13 @@ bool load_config(const std::string& config_path) {
             g_config.controls.deadzone = static_cast<float>(controls["deadzone"].value_or(double(DEFAULT_DEADZONE)));
             g_config.controls.analog_aim = controls["analog_aim"].value_or(true);
             g_config.controls.rumble = controls["rumble"].value_or(true);
+            g_config.controls.rumble_strength = std::clamp(
+                static_cast<int>(controls["rumble_strength"].value_or(int64_t(DEFAULT_RUMBLE_STRENGTH))),
+                0,
+                100);
+            if (g_config.controls.rumble_strength == 0) {
+                g_config.controls.rumble = false;
+            }
             g_config.controls.swap_sticks = controls["swap_sticks"].value_or(false);
 
             if (g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE_SHIFT &&

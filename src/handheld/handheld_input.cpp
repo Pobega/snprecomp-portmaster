@@ -13,6 +13,10 @@
 #include <thread>
 #include <vector>
 
+#ifdef __linux__
+#include <unistd.h>
+#endif
+
 #include <SDL2/SDL.h>
 
 #include "handheld_config.h"
@@ -47,9 +51,11 @@ constexpr int16_t AXIS_TRIGGER_THRESHOLD = 8000;
 constexpr float MAX_AXIS_VALUE = 32767.0f;
 constexpr int ROLL_STEP_FRAMES = 2;
 constexpr int ROLL_TOTAL_STEPS = 4;
-constexpr uint16_t RUMBLE_LOW_FREQ = 0x8000;
-constexpr uint16_t RUMBLE_HIGH_FREQ = 0x8000;
 constexpr uint32_t RUMBLE_DURATION_MS = 250;
+constexpr const char* SYSFS_MOTOR_GPIO_VALUE_PATH = "/sys/class/gpio/gpio227/value";
+constexpr const char* SYSFS_MOTOR_VOLTAGE_PATH = "/sys/class/motor/voltage";
+constexpr int SYSFS_MOTOR_MIN_UV = 500000;
+constexpr int SYSFS_MOTOR_MAX_UV = 2200000;
 constexpr uint32_t RETICLE_ACTIVE_TIMEOUT_MS = 150;
 constexpr uint32_t LOAD_TABLE_ADDR = 0x800597ACu;
 constexpr uint32_t LOAD_TABLE_STRIDE = 20u;
@@ -68,6 +74,84 @@ std::mutex s_input_mutex;
 std::atomic<uint32_t> s_last_gameplay_reticle_ms{0};
 std::atomic<uint32_t> s_last_menu_cursor_ms{0};
 std::atomic<const uint8_t*> s_rdram_ptr{nullptr};
+
+// Fallback vibrator driver for handhelds (e.g., TrimUI Brick) that expose the
+// motor via Linux sysfs GPIO/voltage rather than an evdev EV_FF device.
+struct SysfsRumble {
+    bool available = false;
+    bool active = false;
+    int initial_uv = 0;
+    int last_written_uv = -1;
+    std::chrono::steady_clock::time_point expires_at{};
+
+    static void write_int(const char* path, int value) {
+        std::FILE* f = std::fopen(path, "w");
+        if (f != nullptr) {
+            std::fprintf(f, "%d", value);
+            std::fclose(f);
+        }
+    }
+
+    void init() {
+#ifdef __linux__
+        if (access(SYSFS_MOTOR_GPIO_VALUE_PATH, W_OK) != 0) {
+            return;
+        }
+        available = true;
+        std::FILE* f = std::fopen(SYSFS_MOTOR_VOLTAGE_PATH, "r");
+        if (f != nullptr) {
+            int uv = 0;
+            if (std::fscanf(f, "%d", &uv) == 1 && uv > 0) {
+                initial_uv = uv;
+            }
+            std::fclose(f);
+        }
+        std::fprintf(stderr, "[INPUT] Sysfs rumble fallback enabled (initial_uv=%d)\n", initial_uv);
+#endif
+    }
+
+    void start(float intensity, uint32_t duration_ms) {
+        if (!available) {
+            return;
+        }
+        int max_uv = (initial_uv > 0) ? std::min(initial_uv, SYSFS_MOTOR_MAX_UV) : SYSFS_MOTOR_MAX_UV;
+        int clamped_max = std::max(max_uv, SYSFS_MOTOR_MIN_UV);
+        float clamped_intensity = std::clamp(intensity, 0.0f, 1.0f);
+        int target_uv = SYSFS_MOTOR_MIN_UV +
+            static_cast<int>(clamped_intensity * static_cast<float>(clamped_max - SYSFS_MOTOR_MIN_UV));
+        if (target_uv != last_written_uv) {
+            write_int(SYSFS_MOTOR_VOLTAGE_PATH, target_uv);
+            last_written_uv = target_uv;
+        }
+        write_int(SYSFS_MOTOR_GPIO_VALUE_PATH, 1);
+        active = true;
+        expires_at = std::chrono::steady_clock::now() + std::chrono::milliseconds(duration_ms);
+    }
+
+    void stop() {
+        if (!available || !active) {
+            return;
+        }
+        write_int(SYSFS_MOTOR_GPIO_VALUE_PATH, 0);
+        active = false;
+    }
+
+    void tick() {
+        if (active && std::chrono::steady_clock::now() >= expires_at) {
+            stop();
+        }
+    }
+
+    void shutdown() {
+        stop();
+        if (available && initial_uv > 0 && last_written_uv != initial_uv) {
+            write_int(SYSFS_MOTOR_VOLTAGE_PATH, initial_uv);
+            last_written_uv = initial_uv;
+        }
+    }
+};
+
+SysfsRumble s_sysfs_rumble;
 
 struct RollStateMachine {
     bool roll_button_was_pressed = false;
@@ -508,10 +592,12 @@ void init_input() {
     s_main_thread_id = std::this_thread::get_id();
     log_detected_joysticks();
     open_primary_controller();
+    s_sysfs_rumble.init();
 }
 
 void shutdown_input() {
     std::lock_guard<std::mutex> lock(s_input_mutex);
+    s_sysfs_rumble.shutdown();
     if (s_controller != nullptr) {
         SDL_GameControllerClose(s_controller);
         s_controller = nullptr;
@@ -560,6 +646,12 @@ void poll_input() {
                 SDL_JoystickClose(s_joystick);
                 s_joystick = nullptr;
                 open_primary_controller();
+            }
+            break;
+        case SDL_WINDOWEVENT:
+            if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
+                event.window.event == SDL_WINDOWEVENT_HIDDEN) {
+                s_sysfs_rumble.stop();
             }
             break;
         case SDL_KEYDOWN:
@@ -612,6 +704,8 @@ void poll_input() {
         s_guide_held = false;
     }
     s_prev_guide = pad.menu_guide;
+
+    s_sysfs_rumble.tick();
 
     // Process active overlay menu inputs during poll_input (main thread / 60 Hz)
     if (is_overlay_open()) {
@@ -929,20 +1023,32 @@ void set_rumble(int controller_num, bool rumble) {
     if (controller_num != 0) {
         return;
     }
-    if (!get_config().controls.rumble) {
-        return;
-    }
 
+    const auto& controls = get_config().controls;
     std::lock_guard<std::mutex> lock(s_input_mutex);
-    if (s_controller == nullptr) {
+    if (!controls.rumble || controls.rumble_strength <= 0 || !rumble) {
+        if (s_controller != nullptr) {
+            SDL_GameControllerRumble(s_controller, 0, 0, 0);
+        } else if (s_joystick != nullptr) {
+            SDL_JoystickRumble(s_joystick, 0, 0, 0);
+        }
+        s_sysfs_rumble.stop();
         return;
     }
 
-    if (rumble) {
-        SDL_GameControllerRumble(s_controller, RUMBLE_LOW_FREQ, RUMBLE_HIGH_FREQ, RUMBLE_DURATION_MS);
-    } else {
-        SDL_GameControllerRumble(s_controller, 0, 0, 0);
+    float strength = std::clamp(static_cast<float>(controls.rumble_strength) / 100.0f, 0.0f, 1.0f);
+    uint16_t sdl_strength = static_cast<uint16_t>(std::round(strength * 65535.0f));
+
+    if (s_controller != nullptr &&
+        SDL_GameControllerRumble(s_controller, sdl_strength, sdl_strength, RUMBLE_DURATION_MS) == 0) {
+        return;
     }
+    if (s_controller == nullptr && s_joystick != nullptr &&
+        SDL_JoystickRumble(s_joystick, sdl_strength, sdl_strength, RUMBLE_DURATION_MS) == 0) {
+        return;
+    }
+
+    s_sysfs_rumble.start(strength, RUMBLE_DURATION_MS);
 }
 
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num) {

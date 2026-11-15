@@ -460,7 +460,10 @@ std::string get_row_value(MenuRow row, const HandheldConfig& cfg) {
     case MenuRow::VSync:
         return cfg.video.vsync ? "On" : "Off";
     case MenuRow::Rumble:
-        return cfg.controls.rumble ? "On" : "Off";
+        if (!cfg.controls.rumble || cfg.controls.rumble_strength <= 0) {
+            return "Off";
+        }
+        return std::to_string(cfg.controls.rumble_strength) + "%";
     case MenuRow::MasterVolume:
         return std::to_string(cfg.audio.master_volume) + "%";
     case MenuRow::RetroAchievements:
@@ -552,9 +555,15 @@ void cycle_row_value(MenuRow row, bool forward) {
         cfg.video.vsync = !cfg.video.vsync;
         snp::gles3::set_vsync_enabled(cfg.video.vsync);
         break;
-    case MenuRow::Rumble:
-        cfg.controls.rumble = !cfg.controls.rumble;
+    case MenuRow::Rumble: {
+        int current = (cfg.controls.rumble && cfg.controls.rumble_strength > 0) ? cfg.controls.rumble_strength : 0;
+        int next = std::clamp(current + (forward ? 10 : -10), 0, 100);
+        cfg.controls.rumble = (next > 0);
+        if (next > 0) {
+            cfg.controls.rumble_strength = next;
+        }
         break;
+    }
     case MenuRow::MasterVolume: {
         int delta = forward ? 10 : -10;
         cfg.audio.master_volume = std::clamp(cfg.audio.master_volume + delta, 0, 100);
