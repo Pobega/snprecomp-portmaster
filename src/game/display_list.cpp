@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "recomp.h"
+#include "ultramodern/ultramodern.hpp"
 #ifndef SNP_BACKEND_GLES3
 #include "rt64_device_summary.h"
 #endif
@@ -1772,7 +1773,8 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
     pending_filter = 0;
     bool widen = snp::get_widescreen_scale() > 1.0f;
     bool heighten = snp::get_tallscreen_scale() > 1.0f;
-    bool expanded = widen || heighten;
+    bool expand_aspect = ultramodern::renderer::get_graphics_config().ar_option == ultramodern::renderer::AspectRatio::Expand;
+    bool expanded = expand_aspect || widen || heighten;
     interp_bank = (interp_bank + 1) % interp_banks;
     interp_entry = 0;
     snp::interp_new_frame();
@@ -1826,7 +1828,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
         if ((expanded && starts_with_picture) || clear_all) {
             MEM_W(0x30, task) = (int32_t)clear_prefix(rdram, dl, clear_all);
         }
-        else if (expanded && cimg_count > 0) {
+        else if ((widen || heighten) && cimg_count > 0) {
             // The fog colour the frame's scenery starts with (black if none):
             // the far scenery fades into it, and it shows where the scenery
             // doesn't reach the strips (past the edge of 2-2's sea in the
