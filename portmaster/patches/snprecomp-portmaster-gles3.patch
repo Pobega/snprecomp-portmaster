@@ -9026,10 +9026,10 @@ index 0000000..1ee92d5
 +} // namespace snp::handheld
 diff --git a/src/handheld/ra_client.cpp b/src/handheld/ra_client.cpp
 new file mode 100644
-index 0000000..a532f32
+index 0000000..21e4267
 --- /dev/null
 +++ b/src/handheld/ra_client.cpp
-@@ -0,0 +1,1247 @@
+@@ -0,0 +1,1252 @@
 +#include "ra_client.h"
 +
 +#include <algorithm>
@@ -9094,8 +9094,8 @@ index 0000000..a532f32
 +std::string s_game_title;
 +uint32_t s_current_game_id = 0;
 +std::string s_current_game_hash;
-+uint32_t s_unlocked_achievements = 0;
-+uint32_t s_total_achievements = 0;
++std::atomic<uint32_t> s_unlocked_achievements{0};
++std::atomic<uint32_t> s_total_achievements{0};
 +bool s_offline_toast_shown = false;
 +
 +rc_client_t* s_client = nullptr;
@@ -9571,8 +9571,13 @@ index 0000000..a532f32
 +                    p.unlock_epoch_sec = (now_sec >= 1700000000ULL) ? now_sec : 0;
 +                    queue_pending_unlock(p);
 +
++                    uint32_t total = s_total_achievements.load();
++                    uint32_t unlocked = s_unlocked_achievements.load();
++                    // Fall back to 1 when total is unknown so offline unlocks never fire a false mastery toast.
++                    uint32_t remaining = (total == 0) ? 1 : (unlocked < total ? (total - unlocked) : 0);
 +                    item.http_status_code = 200;
-+                    item.body = "{\"Success\":true,\"AchievementID\":" + std::to_string(p.achievement_id) + ",\"AchievementsRemaining\":0}";
++                    item.body = "{\"Success\":true,\"AchievementID\":" + std::to_string(p.achievement_id) +
++                                ",\"AchievementsRemaining\":" + std::to_string(remaining) + "}";
 +                }
 +            } else {
 +                bool served_from_cache = false;
