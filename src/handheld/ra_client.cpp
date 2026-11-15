@@ -62,8 +62,8 @@ std::string s_discovered_password;
 std::string s_game_title;
 uint32_t s_current_game_id = 0;
 std::string s_current_game_hash;
-uint32_t s_unlocked_achievements = 0;
-uint32_t s_total_achievements = 0;
+std::atomic<uint32_t> s_unlocked_achievements{0};
+std::atomic<uint32_t> s_total_achievements{0};
 bool s_offline_toast_shown = false;
 
 rc_client_t* s_client = nullptr;
@@ -539,8 +539,13 @@ void http_worker_thread_func() {
                     p.unlock_epoch_sec = (now_sec >= 1700000000ULL) ? now_sec : 0;
                     queue_pending_unlock(p);
 
+                    uint32_t total = s_total_achievements.load();
+                    uint32_t unlocked = s_unlocked_achievements.load();
+                    // Fall back to 1 when total is unknown so offline unlocks never fire a false mastery toast.
+                    uint32_t remaining = (total == 0) ? 1 : (unlocked < total ? (total - unlocked) : 0);
                     item.http_status_code = 200;
-                    item.body = "{\"Success\":true,\"AchievementID\":" + std::to_string(p.achievement_id) + ",\"AchievementsRemaining\":0}";
+                    item.body = "{\"Success\":true,\"AchievementID\":" + std::to_string(p.achievement_id) +
+                                ",\"AchievementsRemaining\":" + std::to_string(remaining) + "}";
                 }
             } else {
                 bool served_from_cache = false;
