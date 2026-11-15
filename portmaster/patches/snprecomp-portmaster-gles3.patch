@@ -622,20 +622,21 @@ index 6d380e4..5587288 100644
  # Before the reticle's velocity is added to its position ($s2 + 0x28, + 0x2C)
  # the mouse can move it (src/main/mouse.cpp).
 diff --git a/src/game/display_list.cpp b/src/game/display_list.cpp
-index b08120a..85a62eb 100644
+index b08120a..4a6ec22 100644
 --- a/src/game/display_list.cpp
 +++ b/src/game/display_list.cpp
-@@ -21,7 +21,9 @@
+@@ -21,7 +21,10 @@
  #include <vector>
  
  #include "recomp.h"
++#include "ultramodern/ultramodern.hpp"
 +#ifndef SNP_BACKEND_GLES3
  #include "rt64_device_summary.h"
 +#endif
  #ifdef _WIN32
  #include "SDL.h"
  #else
-@@ -123,7 +125,8 @@ namespace {
+@@ -123,7 +126,8 @@ namespace {
              uint32_t word = (uint32_t)MEM_W(off, (gpr)(int32_t)src);
              if (off % 16 == 0) {
                  int16_t x = (int16_t)(word >> 16);
@@ -645,7 +646,7 @@ index b08120a..85a62eb 100644
              }
              MEM_W(off, (gpr)(int32_t)dst) = (int32_t)word;
          }
-@@ -976,7 +979,9 @@ namespace {
+@@ -976,7 +980,9 @@ namespace {
      constexpr uint32_t hud_element_bottom = 80 * 4;
      constexpr int32_t hud_margin = 16 * 4;
      constexpr int32_t right_origin_shift = -320 * 4; // RT64 adds the width to right-anchored coordinates
@@ -655,7 +656,7 @@ index b08120a..85a62eb 100644
      bool in_hud = false;
      // The front-end menus draw with the same projection, and the OPT. menu's
      // top row is in the band: no anchoring there.
-@@ -1012,7 +1017,7 @@ namespace {
+@@ -1012,7 +1018,7 @@ namespace {
      }
  
      // addr: a G_TEXRECT (3 commands) or G_FILLRECT (1 command).
@@ -664,7 +665,7 @@ index b08120a..85a62eb 100644
          if (hud_entry >= hud_entries) {
              return;
          }
-@@ -1025,8 +1030,8 @@ namespace {
+@@ -1025,8 +1031,8 @@ namespace {
          cmd(0x64000017, 0);          // gEXPushScissor
          cmd(0x64000005, (origin_left << 2) | (origin_right << 14)); // gEXSetScissor: the whole window
          cmd(0, 240 * 4);
@@ -675,7 +676,7 @@ index b08120a..85a62eb 100644
          for (uint32_t i = 0; i < words; i++) {
              cmd((uint32_t)MEM_W(0, (gpr)(int32_t)(addr + i * 8)), (uint32_t)MEM_W(4, (gpr)(int32_t)(addr + i * 8)));
          }
-@@ -1043,23 +1048,26 @@ namespace {
+@@ -1043,23 +1049,26 @@ namespace {
          }
      }
  
@@ -713,7 +714,7 @@ index b08120a..85a62eb 100644
          cmd(0xE0525464, 0x10000064); // gEXEnable
          cmd(0xE3000A01, 0x00300000); // cycle type: fill
          cmd(0xF7000000, fill);
-@@ -1071,12 +1079,24 @@ namespace {
+@@ -1071,12 +1080,24 @@ namespace {
                  continue;
              }
              cmd(cimgs[i][0], cimgs[i][1]);
@@ -744,7 +745,7 @@ index b08120a..85a62eb 100644
          }
          cmd(0x64000006, origin_none | (origin_none << 12)); // back to unanchored
          cmd(0, 0);
-@@ -1112,6 +1132,10 @@ namespace {
+@@ -1112,6 +1133,10 @@ namespace {
          if (r.words != 1 || r.lry - r.uly < 200 * 4 || r.lrx - r.ulx > 8 * 4) {
              return;
          }
@@ -755,7 +756,7 @@ index b08120a..85a62eb 100644
          if (r.ulx >= 640 * 4) {
              anchor_rect(rdram, r.addr, 1, origin_none, -1024 * 4);
          }
-@@ -1169,12 +1193,15 @@ namespace {
+@@ -1169,12 +1194,15 @@ namespace {
          const float size = std::clamp((240.0f * 4 - (B - T)) / ((240.0f - 64.0f) * 4), 0.0f, 1.0f);
          const float side = std::clamp(((L + R) / 2.0f - 160.0f * 4) / (64.0f * 4), -1.0f, 1.0f);
          const int32_t offset = (int32_t)std::lround(extra * size * side);
@@ -772,7 +773,7 @@ index b08120a..85a62eb 100644
              }
          }
          return true;
-@@ -1265,6 +1292,8 @@ namespace {
+@@ -1265,6 +1293,8 @@ namespace {
                  place_crosshair_line(rdram, fill_run[i]);
              }
          }
@@ -781,7 +782,7 @@ index b08120a..85a62eb 100644
          for (uint32_t i = 0; i < n; i++) {
              if (framed[i] || find(i) != i) {
                  continue;
-@@ -1278,14 +1307,33 @@ namespace {
+@@ -1278,14 +1308,33 @@ namespace {
                      lry = std::max(lry, fill_run[j].lry);
                  }
              }
@@ -819,7 +820,7 @@ index b08120a..85a62eb 100644
                  }
              }
          }
-@@ -1698,6 +1746,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+@@ -1698,6 +1747,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
      // menu). Where the reticle isn't moved, there's nothing to match and nothing changes.
      live_id = snp::mouse::live_reticle_id(rdram, live_x, live_y);
  
@@ -827,7 +828,7 @@ index b08120a..85a62eb 100644
      // A GPU without descriptor indexing whose driver refused every game shader (an older Mali,
      // issue 17) shows nothing in play: say why once, instead of a silent black screen. The game
      // carries on as before after OK.
-@@ -1709,6 +1758,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+@@ -1709,6 +1759,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
              "it, but the screen stays black.\n\nOlder Mali GPUs, like the Mali-G52, are known to lack it.";
          SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Sin and Punishment Recompiled", message.c_str(), nullptr);
      }
@@ -835,12 +836,13 @@ index b08120a..85a62eb 100644
      live_recent_count = (live_id != 0) ? snp::mouse::recent_reticle_positions(live_recent_x, live_recent_y, live_recent_size) : 0;
      live_bank = (live_bank + 1) % live_banks;
      live_entry = 0;
-@@ -1721,13 +1771,15 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+@@ -1721,13 +1772,16 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
      }
      pending_filter = 0;
      bool widen = snp::get_widescreen_scale() > 1.0f;
 +    bool heighten = snp::get_tallscreen_scale() > 1.0f;
-+    bool expanded = widen || heighten;
++    bool expand_aspect = ultramodern::renderer::get_graphics_config().ar_option == ultramodern::renderer::AspectRatio::Expand;
++    bool expanded = expand_aspect || widen || heighten;
      interp_bank = (interp_bank + 1) % interp_banks;
      interp_entry = 0;
      snp::interp_new_frame();
@@ -852,7 +854,7 @@ index b08120a..85a62eb 100644
      }
      for (uint32_t& s : segments) {
          s = 0;
-@@ -1752,7 +1804,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+@@ -1752,7 +1806,7 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
      instance_tags.clear();
      modelview_top = 0;
      modelview[0] = identity_matrix();
@@ -861,7 +863,7 @@ index b08120a..85a62eb 100644
      end_fill_run(rdram);
      align_crosshair_lines(rdram);
      number_tagged_instances(rdram);
-@@ -1760,21 +1812,21 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
+@@ -1760,21 +1814,21 @@ extern "C" void snp_display_list_hook(uint8_t* rdram, int32_t task) {
      // inset keep the wide picture (the game never clears them): the first
      // frames clear every color image they draw to, enough for all three
      // framebuffers.
@@ -884,7 +886,7 @@ index b08120a..85a62eb 100644
              MEM_W(0x30, task) = (int32_t)clear_prefix(rdram, dl, clear_all);
          }
 -        else if (widen && cimg_count > 0) {
-+        else if (expanded && cimg_count > 0) {
++        else if ((widen || heighten) && cimg_count > 0) {
              // The fog colour the frame's scenery starts with (black if none):
              // the far scenery fades into it, and it shows where the scenery
              // doesn't reach the strips (past the edge of 2-2's sea in the
