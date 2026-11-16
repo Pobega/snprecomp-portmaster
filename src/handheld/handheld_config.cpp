@@ -45,6 +45,144 @@ std::string resolve_default_control_scheme() {
     return CONTROL_SCHEME_DPAD_STRAFE_SHIFT;
 }
 
+ControlBindings get_preset_bindings(const std::string& scheme) {
+    ControlBindings b{};
+    if (scheme == CONTROL_SCHEME_BUMPER_STRAFE) {
+        b.aim_mode = AimDpadMode::DpadAim;
+        b.strafe_left = {PhysicalButton::L1};
+        b.strafe_right = {PhysicalButton::R1};
+        b.fire = {PhysicalButton::A, PhysicalButton::R2};
+        b.jump = {PhysicalButton::B};
+        b.manual_aim = {PhysicalButton::X, PhysicalButton::L2};
+        b.pause = {PhysicalButton::Start};
+    } else if (scheme == CONTROL_SCHEME_FACE_STRAFE) {
+        b.aim_mode = AimDpadMode::DpadAim;
+        b.strafe_left = {PhysicalButton::Y};
+        b.strafe_right = {PhysicalButton::B};
+        b.roll = {PhysicalButton::A};
+        b.fire = {PhysicalButton::R1, PhysicalButton::R2};
+        b.jump = {PhysicalButton::L1, PhysicalButton::X};
+        b.manual_aim = {PhysicalButton::L2};
+        b.pause = {PhysicalButton::Start};
+    } else if (scheme == CONTROL_SCHEME_DPAD_AIM) {
+        b.aim_mode = AimDpadMode::DpadAim;
+        b.strafe_left = {PhysicalButton::Y};
+        b.strafe_right = {PhysicalButton::A};
+        b.fire = {PhysicalButton::R1, PhysicalButton::R2};
+        b.jump = {PhysicalButton::L1};
+        b.roll = {PhysicalButton::B, PhysicalButton::L2};
+        b.manual_aim = {PhysicalButton::X};
+        b.pause = {PhysicalButton::Start};
+    } else if (scheme == CONTROL_SCHEME_DPAD_STRAFE) {
+        b.aim_mode = AimDpadMode::FaceAim;
+        b.fire = {PhysicalButton::R1};
+        b.jump = {PhysicalButton::L1};
+        b.roll = {PhysicalButton::L2};
+        b.manual_aim = {PhysicalButton::R2};
+        b.pause = {PhysicalButton::Start};
+    } else if (scheme == CONTROL_SCHEME_TWIN_STICK) {
+        b.aim_mode = AimDpadMode::TwinStick;
+        b.fire = {PhysicalButton::R1, PhysicalButton::R2};
+        b.jump = {PhysicalButton::L1, PhysicalButton::L2};
+        b.roll = {PhysicalButton::X};
+        b.manual_aim = {PhysicalButton::A};
+        b.pause = {PhysicalButton::Start};
+    } else {
+        b.aim_mode = AimDpadMode::StrafeShift;
+        b.fire = {PhysicalButton::A};
+        b.jump = {PhysicalButton::B};
+        b.roll = {PhysicalButton::Y};
+        b.manual_aim = {PhysicalButton::L1, PhysicalButton::R1};
+        b.switch_target = {PhysicalButton::X};
+        b.prev_target = {PhysicalButton::L2};
+        b.next_target = {PhysicalButton::R2};
+        b.pause = {PhysicalButton::Start};
+    }
+    return b;
+}
+
+const char* physical_button_to_string(PhysicalButton btn) {
+    switch (btn) {
+    case PhysicalButton::A: return "a";
+    case PhysicalButton::B: return "b";
+    case PhysicalButton::X: return "x";
+    case PhysicalButton::Y: return "y";
+    case PhysicalButton::L1: return "l1";
+    case PhysicalButton::R1: return "r1";
+    case PhysicalButton::L2: return "l2";
+    case PhysicalButton::R2: return "r2";
+    case PhysicalButton::Start: return "start";
+    case PhysicalButton::None:
+    default: return "none";
+    }
+}
+
+PhysicalButton string_to_physical_button(const std::string& str) {
+    std::string lower;
+    lower.reserve(str.size());
+    for (char ch : str) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    if (lower == "a") return PhysicalButton::A;
+    if (lower == "b") return PhysicalButton::B;
+    if (lower == "x") return PhysicalButton::X;
+    if (lower == "y") return PhysicalButton::Y;
+    if (lower == "l1" || lower == "l") return PhysicalButton::L1;
+    if (lower == "r1" || lower == "r") return PhysicalButton::R1;
+    if (lower == "l2" || lower == "zl") return PhysicalButton::L2;
+    if (lower == "r2" || lower == "zr") return PhysicalButton::R2;
+    if (lower == "start") return PhysicalButton::Start;
+    return PhysicalButton::None;
+}
+
+const char* physical_button_display_name(PhysicalButton btn) {
+    switch (btn) {
+    case PhysicalButton::A: return "A";
+    case PhysicalButton::B: return "B";
+    case PhysicalButton::X: return "X";
+    case PhysicalButton::Y: return "Y";
+    case PhysicalButton::L1: return "L1";
+    case PhysicalButton::R1: return "R1";
+    case PhysicalButton::L2: return "L2";
+    case PhysicalButton::R2: return "R2";
+    case PhysicalButton::Start: return "Start";
+    case PhysicalButton::None:
+    default: return "None";
+    }
+}
+
+const char* aim_dpad_mode_to_string(AimDpadMode mode) {
+    switch (mode) {
+    case AimDpadMode::StrafeShift: return "strafe_shift";
+    case AimDpadMode::DpadAim: return "dpad_aim";
+    case AimDpadMode::FaceAim: return "face_aim";
+    case AimDpadMode::TwinStick: return "twin_stick";
+    default: return "strafe_shift";
+    }
+}
+
+AimDpadMode string_to_aim_dpad_mode(const std::string& str) {
+    std::string lower;
+    lower.reserve(str.size());
+    for (char ch : str) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    if (lower == "dpad_aim" || lower == "dpad") return AimDpadMode::DpadAim;
+    if (lower == "face_aim" || lower == "face") return AimDpadMode::FaceAim;
+    if (lower == "twin_stick" || lower == "twin") return AimDpadMode::TwinStick;
+    return AimDpadMode::StrafeShift;
+}
+
+const char* aim_dpad_mode_display_name(AimDpadMode mode) {
+    switch (mode) {
+    case AimDpadMode::StrafeShift: return "Strafe + Shift";
+    case AimDpadMode::DpadAim: return "D-Pad Aim";
+    case AimDpadMode::FaceAim: return "Face Aim";
+    case AimDpadMode::TwinStick: return "Twin Stick";
+    default: return "Strafe + Shift";
+    }
+}
+
 void apply_graphics_config() {
     snp::gles3::set_vsync_enabled(g_config.video.vsync);
 
@@ -87,7 +225,7 @@ void save_config(const std::string& config_path) {
         << "music_volume = " << g_config.audio.music_volume << "\n"
         << "sfx_volume = " << g_config.audio.sfx_volume << "\n\n"
         << "[controls]\n"
-        << "# Scheme: \"auto\" (detect sticks), \"dpad_strafe_shift\" (Stickless default), \"bumper_strafe\", \"face_strafe\", \"dpad_aim\", \"dpad_strafe\", or \"twin_stick\"\n"
+        << "# Scheme: \"auto\" (detect sticks), \"dpad_strafe_shift\" (Stickless default), \"bumper_strafe\", \"face_strafe\", \"dpad_aim\", \"dpad_strafe\", \"twin_stick\", or \"custom\"\n"
         << "scheme = \"" << g_config.controls.scheme << "\"\n"
         << "# Smart Lock-On: \"auto\" (Hold=Manual default), \"hold\" (Hold=Lock), or \"off\" (N64 toggle)\n"
         << "smart_lock_on = \"" << g_config.controls.smart_lock_on << "\"\n"
@@ -100,6 +238,21 @@ void save_config(const std::string& config_path) {
         << "rumble = " << (g_config.controls.rumble ? "true" : "false") << "\n"
         << "rumble_strength = " << g_config.controls.rumble_strength << "\n"
         << "swap_sticks = " << (g_config.controls.swap_sticks ? "true" : "false") << "\n\n"
+        << "[controls.bindings]\n"
+        << "# Aim / D-Pad Mode: \"strafe_shift\", \"dpad_aim\", \"face_aim\", or \"twin_stick\"\n"
+        << "aim_mode = \"" << aim_dpad_mode_to_string(g_config.controls.bindings.aim_mode) << "\"\n"
+        << "fire = [\"" << physical_button_to_string(g_config.controls.bindings.fire.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.fire.secondary) << "\"]\n"
+        << "jump = [\"" << physical_button_to_string(g_config.controls.bindings.jump.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.jump.secondary) << "\"]\n"
+        << "roll = [\"" << physical_button_to_string(g_config.controls.bindings.roll.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.roll.secondary) << "\"]\n"
+        << "roll_left = [\"" << physical_button_to_string(g_config.controls.bindings.roll_left.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.roll_left.secondary) << "\"]\n"
+        << "roll_right = [\"" << physical_button_to_string(g_config.controls.bindings.roll_right.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.roll_right.secondary) << "\"]\n"
+        << "manual_aim = [\"" << physical_button_to_string(g_config.controls.bindings.manual_aim.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.manual_aim.secondary) << "\"]\n"
+        << "switch_target = [\"" << physical_button_to_string(g_config.controls.bindings.switch_target.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.switch_target.secondary) << "\"]\n"
+        << "prev_target = [\"" << physical_button_to_string(g_config.controls.bindings.prev_target.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.prev_target.secondary) << "\"]\n"
+        << "next_target = [\"" << physical_button_to_string(g_config.controls.bindings.next_target.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.next_target.secondary) << "\"]\n"
+        << "strafe_left = [\"" << physical_button_to_string(g_config.controls.bindings.strafe_left.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.strafe_left.secondary) << "\"]\n"
+        << "strafe_right = [\"" << physical_button_to_string(g_config.controls.bindings.strafe_right.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.strafe_right.secondary) << "\"]\n"
+        << "pause = [\"" << physical_button_to_string(g_config.controls.bindings.pause.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.pause.secondary) << "\"]\n\n"
         << "[cheats]\n"
         << "unlock_options = " << (g_config.cheats.unlock_options ? "true" : "false") << "\n"
         << "infinite_health = " << (g_config.cheats.infinite_health ? "true" : "false") << "\n"
@@ -177,8 +330,59 @@ bool load_config(const std::string& config_path) {
                 g_config.controls.scheme != CONTROL_SCHEME_FACE_STRAFE &&
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_AIM &&
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE &&
-                g_config.controls.scheme != CONTROL_SCHEME_TWIN_STICK) {
+                g_config.controls.scheme != CONTROL_SCHEME_TWIN_STICK &&
+                g_config.controls.scheme != CONTROL_SCHEME_CUSTOM) {
                 g_config.controls.scheme = resolve_default_control_scheme();
+            }
+
+            if (g_config.controls.scheme != CONTROL_SCHEME_CUSTOM) {
+                g_config.controls.bindings = get_preset_bindings(g_config.controls.scheme);
+            } else {
+                g_config.controls.bindings = get_preset_bindings(CONTROL_SCHEME_DPAD_STRAFE_SHIFT);
+                auto b_node = controls["bindings"];
+                if (!b_node.is_table()) {
+                    b_node = tbl["controls"]["bindings"];
+                }
+                if (!b_node.is_table()) {
+                    b_node = tbl["controls.bindings"];
+                }
+                if (b_node.is_table()) {
+                    if (auto aim_str = b_node["aim_mode"].value<std::string>()) {
+                        g_config.controls.bindings.aim_mode = string_to_aim_dpad_mode(*aim_str);
+                    }
+                    auto parse_binding = [](auto&& node, const ActionBinding& def) -> ActionBinding {
+                        ActionBinding b = def;
+                        if (auto arr = node.as_array()) {
+                            if (arr->size() > 0) {
+                                if (auto val = (*arr)[0].template value<std::string>()) {
+                                    b.primary = string_to_physical_button(*val);
+                                }
+                            }
+                            if (arr->size() > 1) {
+                                if (auto val = (*arr)[1].template value<std::string>()) {
+                                    b.secondary = string_to_physical_button(*val);
+                                }
+                            }
+                        } else if (auto val = node.template value<std::string>()) {
+                            b.primary = string_to_physical_button(*val);
+                            b.secondary = PhysicalButton::None;
+                        }
+                        return b;
+                    };
+
+                    g_config.controls.bindings.fire = parse_binding(b_node["fire"], g_config.controls.bindings.fire);
+                    g_config.controls.bindings.jump = parse_binding(b_node["jump"], g_config.controls.bindings.jump);
+                    g_config.controls.bindings.roll = parse_binding(b_node["roll"], g_config.controls.bindings.roll);
+                    g_config.controls.bindings.roll_left = parse_binding(b_node["roll_left"], g_config.controls.bindings.roll_left);
+                    g_config.controls.bindings.roll_right = parse_binding(b_node["roll_right"], g_config.controls.bindings.roll_right);
+                    g_config.controls.bindings.manual_aim = parse_binding(b_node["manual_aim"], g_config.controls.bindings.manual_aim);
+                    g_config.controls.bindings.switch_target = parse_binding(b_node["switch_target"], g_config.controls.bindings.switch_target);
+                    g_config.controls.bindings.prev_target = parse_binding(b_node["prev_target"], g_config.controls.bindings.prev_target);
+                    g_config.controls.bindings.next_target = parse_binding(b_node["next_target"], g_config.controls.bindings.next_target);
+                    g_config.controls.bindings.strafe_left = parse_binding(b_node["strafe_left"], g_config.controls.bindings.strafe_left);
+                    g_config.controls.bindings.strafe_right = parse_binding(b_node["strafe_right"], g_config.controls.bindings.strafe_right);
+                    g_config.controls.bindings.pause = parse_binding(b_node["pause"], g_config.controls.bindings.pause);
+                }
             }
 
             if (g_config.controls.smart_lock_on != SMART_LOCK_AUTO &&
