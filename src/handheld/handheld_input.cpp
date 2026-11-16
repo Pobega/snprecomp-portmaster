@@ -294,7 +294,35 @@ bool s_prev_nav_left = false;
 bool s_prev_nav_right = false;
 bool s_prev_nav_a = false;
 bool s_prev_nav_b = false;
+bool s_prev_nav_x = false;
+bool s_prev_nav_y = false;
+bool s_prev_nav_l1 = false;
+bool s_prev_nav_r1 = false;
+bool s_prev_nav_l2 = false;
+bool s_prev_nav_r2 = false;
 bool s_prev_nav_start = false;
+
+bool is_physical_button_pressed(const PhysicalPadState& pad, PhysicalButton btn) {
+    switch (btn) {
+    case PhysicalButton::A: return pad.east_a;
+    case PhysicalButton::B: return pad.south_b;
+    case PhysicalButton::X: return pad.north_x;
+    case PhysicalButton::Y: return pad.west_y;
+    case PhysicalButton::L1: return pad.l1;
+    case PhysicalButton::R1: return pad.r1;
+    case PhysicalButton::L2: return pad.l2;
+    case PhysicalButton::R2: return pad.r2;
+    case PhysicalButton::Start: return pad.start;
+    case PhysicalButton::None:
+    default:
+        return false;
+    }
+}
+
+bool is_action_pressed(const PhysicalPadState& pad, const ActionBinding& binding) {
+    return is_physical_button_pressed(pad, binding.primary) ||
+           is_physical_button_pressed(pad, binding.secondary);
+}
 
 void log_detected_joysticks() {
     int num = SDL_NumJoysticks();
@@ -691,8 +719,13 @@ void poll_input() {
 
     // Select alone tap trigger
     if (pad.select && !s_prev_select) {
-        s_select_held = true;
-        s_select_combo_used = false;
+        if (is_overlay_open() && is_overlay_listening()) {
+            s_select_combo_used = true;
+            cancel_overlay_listening();
+        } else {
+            s_select_held = true;
+            s_select_combo_used = false;
+        }
     } else if (!pad.select && s_prev_select) {
         if (s_select_held && !s_select_combo_used) {
             toggle_overlay();
@@ -703,8 +736,13 @@ void poll_input() {
 
     // Menu/Guide / F1 / Tab alone tap trigger
     if (pad.menu_guide && !s_prev_guide) {
-        s_guide_held = true;
-        s_guide_combo_used = false;
+        if (is_overlay_open() && is_overlay_listening()) {
+            s_guide_combo_used = true;
+            cancel_overlay_listening();
+        } else {
+            s_guide_held = true;
+            s_guide_combo_used = false;
+        }
     } else if (!pad.menu_guide && s_prev_guide) {
         if (s_guide_held && !s_guide_combo_used) {
             toggle_overlay();
@@ -723,6 +761,12 @@ void poll_input() {
         bool nav_right = pad.dpad_right && !s_prev_nav_right;
         bool nav_a = pad.east_a && !s_prev_nav_a;
         bool nav_b = pad.south_b && !s_prev_nav_b;
+        bool nav_x = pad.north_x && !s_prev_nav_x;
+        bool nav_y = pad.west_y && !s_prev_nav_y;
+        bool nav_l1 = pad.l1 && !s_prev_nav_l1;
+        bool nav_r1 = pad.r1 && !s_prev_nav_r1;
+        bool nav_l2 = pad.l2 && !s_prev_nav_l2;
+        bool nav_r2 = pad.r2 && !s_prev_nav_r2;
         bool nav_start = pad.start && !s_prev_nav_start;
 
         s_prev_nav_up = pad.dpad_up;
@@ -731,9 +775,33 @@ void poll_input() {
         s_prev_nav_right = pad.dpad_right;
         s_prev_nav_a = pad.east_a;
         s_prev_nav_b = pad.south_b;
+        s_prev_nav_x = pad.north_x;
+        s_prev_nav_y = pad.west_y;
+        s_prev_nav_l1 = pad.l1;
+        s_prev_nav_r1 = pad.r1;
+        s_prev_nav_l2 = pad.l2;
+        s_prev_nav_r2 = pad.r2;
         s_prev_nav_start = pad.start;
 
-        update_overlay_input(nav_up, nav_down, nav_left, nav_right, nav_a, nav_b, nav_start);
+        if (is_overlay_listening()) {
+            PhysicalButton pressed = PhysicalButton::None;
+            if (nav_a) pressed = PhysicalButton::A;
+            else if (nav_b) pressed = PhysicalButton::B;
+            else if (nav_x) pressed = PhysicalButton::X;
+            else if (nav_y) pressed = PhysicalButton::Y;
+            else if (nav_l1) pressed = PhysicalButton::L1;
+            else if (nav_r1) pressed = PhysicalButton::R1;
+            else if (nav_l2) pressed = PhysicalButton::L2;
+            else if (nav_r2) pressed = PhysicalButton::R2;
+            else if (nav_start) pressed = PhysicalButton::Start;
+
+            if (pressed != PhysicalButton::None) {
+                deliver_overlay_listen_button(pressed);
+            }
+        } else {
+            update_overlay_input(nav_up, nav_down, nav_left, nav_right,
+                                 nav_a, nav_b, nav_x, nav_y, nav_start);
+        }
 
         s_roll_state = {};
         s_aim_ramp = {};
@@ -746,6 +814,12 @@ void poll_input() {
     s_prev_nav_right = pad.dpad_right;
     s_prev_nav_a = pad.east_a;
     s_prev_nav_b = pad.south_b;
+    s_prev_nav_x = pad.north_x;
+    s_prev_nav_y = pad.west_y;
+    s_prev_nav_l1 = pad.l1;
+    s_prev_nav_r1 = pad.r1;
+    s_prev_nav_l2 = pad.l2;
+    s_prev_nav_r2 = pad.r2;
     s_prev_nav_start = pad.start;
 }
 
@@ -829,51 +903,16 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
         s_explicit_switch_dir.store(0, std::memory_order_relaxed);
     } else {
         // Stage Combat Context
+        const ControlBindings& bindings = (config.scheme == CONTROL_SCHEME_CUSTOM)
+            ? config.bindings
+            : get_preset_bindings(config.scheme);
+
         int aim_dx = 0;
         int aim_dy = 0;
-        bool lock_btn = false;
 
-        if (config.scheme == CONTROL_SCHEME_BUMPER_STRAFE) {
-            aim_dx = (pad.dpad_right ? 1 : 0) - (pad.dpad_left ? 1 : 0);
-            aim_dy = (pad.dpad_up ? 1 : 0) - (pad.dpad_down ? 1 : 0);
-            s_aim_ramp.update(aim_dx, aim_dy, stick_x, stick_y);
-            s_flick_dx.store(aim_dx, std::memory_order_relaxed);
-            s_flick_dy.store(aim_dy, std::memory_order_relaxed);
-
-            float lx = apply_axis_deadzone(pad.left_x, config.deadzone);
-            float ly = apply_axis_deadzone(-pad.left_y, config.deadzone);
-            if (std::abs(lx) > 0.01f) stick_x = std::clamp(stick_x + lx, -1.0f, 1.0f);
-            if (std::abs(ly) > 0.01f) stick_y = std::clamp(stick_y + ly, -1.0f, 1.0f);
-
-            if (pad.l1) pad_buttons |= N64_C_LEFT;
-            if (pad.r1) pad_buttons |= N64_C_RIGHT;
-            if (pad.east_a || pad.west_y || pad.r2) pad_buttons |= N64_Z;
-            if (pad.south_b) pad_buttons |= N64_R;
-            lock_btn = pad.north_x || pad.l2;
-            if (pad.start) pad_buttons |= N64_START;
-
-        } else if (config.scheme == CONTROL_SCHEME_FACE_STRAFE) {
-            aim_dx = (pad.dpad_right ? 1 : 0) - (pad.dpad_left ? 1 : 0);
-            aim_dy = (pad.dpad_up ? 1 : 0) - (pad.dpad_down ? 1 : 0);
-            s_aim_ramp.update(aim_dx, aim_dy, stick_x, stick_y);
-            s_flick_dx.store(aim_dx, std::memory_order_relaxed);
-            s_flick_dy.store(aim_dy, std::memory_order_relaxed);
-
-            float lx = apply_axis_deadzone(pad.left_x, config.deadzone);
-            float ly = apply_axis_deadzone(-pad.left_y, config.deadzone);
-            if (std::abs(lx) > 0.01f) stick_x = std::clamp(stick_x + lx, -1.0f, 1.0f);
-            if (std::abs(ly) > 0.01f) stick_y = std::clamp(stick_y + ly, -1.0f, 1.0f);
-
-            if (pad.west_y) pad_buttons |= N64_C_LEFT;
-            if (pad.south_b) pad_buttons |= N64_C_RIGHT;
-            if (pad.east_a) roll_requested = true;
-            if (pad.r1 || pad.r2) pad_buttons |= N64_Z;
-            if (pad.l1 || pad.north_x) pad_buttons |= N64_R;
-            lock_btn = pad.l2;
-            if (pad.start) pad_buttons |= N64_START;
-
-        } else if (config.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) {
-            bool aim_shift = pad.l1 || pad.r1;
+        switch (bindings.aim_mode) {
+        case AimDpadMode::StrafeShift: {
+            bool aim_shift = is_action_pressed(pad, bindings.manual_aim);
             static bool s_prev_shift_x = false;
             static bool s_prev_strafe_x = false;
             static bool s_prev_l2 = false;
@@ -886,7 +925,8 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
                 s_flick_dx.store(0, std::memory_order_relaxed);
                 s_flick_dy.store(0, std::memory_order_relaxed);
 
-                if (pad.north_x && !s_prev_shift_x) {
+                bool switch_pressed = is_action_pressed(pad, bindings.switch_target);
+                if (switch_pressed && !s_prev_shift_x) {
                     s_recenter_requested.store(true, std::memory_order_relaxed);
                 }
             } else {
@@ -897,39 +937,38 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
                 s_flick_dx.store(0, std::memory_order_relaxed);
                 s_flick_dy.store(flick_dy, std::memory_order_relaxed);
 
-                if (pad.north_x && !s_prev_strafe_x) {
+                bool switch_pressed = is_action_pressed(pad, bindings.switch_target);
+                if (switch_pressed && !s_prev_strafe_x) {
                     if (config.smart_lock_on != SMART_LOCK_OFF) {
                         s_explicit_switch_dir.store(0, std::memory_order_relaxed);
                         s_explicit_target_switch.store(true, std::memory_order_relaxed);
                     }
                 }
                 if (config.smart_lock_on != SMART_LOCK_OFF) {
-                    if (pad.l2 && !s_prev_l2) {
+                    bool prev_pressed = is_action_pressed(pad, bindings.prev_target);
+                    bool next_pressed = is_action_pressed(pad, bindings.next_target);
+                    if (prev_pressed && !s_prev_l2) {
                         s_explicit_switch_dir.store(-1, std::memory_order_relaxed);
                         s_explicit_target_switch.store(true, std::memory_order_relaxed);
-                    } else if (pad.r2 && !s_prev_r2) {
+                    } else if (next_pressed && !s_prev_r2) {
                         s_explicit_switch_dir.store(1, std::memory_order_relaxed);
                         s_explicit_target_switch.store(true, std::memory_order_relaxed);
                     }
                 }
             }
-            s_prev_shift_x = aim_shift && pad.north_x;
-            s_prev_strafe_x = !aim_shift && pad.north_x;
-            s_prev_l2 = pad.l2;
-            s_prev_r2 = pad.r2;
+            s_prev_shift_x = aim_shift && is_action_pressed(pad, bindings.switch_target);
+            s_prev_strafe_x = !aim_shift && is_action_pressed(pad, bindings.switch_target);
+            s_prev_l2 = is_action_pressed(pad, bindings.prev_target);
+            s_prev_r2 = is_action_pressed(pad, bindings.next_target);
 
             float lx = apply_axis_deadzone(pad.left_x, config.deadzone);
             float ly = apply_axis_deadzone(-pad.left_y, config.deadzone);
             if (std::abs(lx) > 0.01f) stick_x = std::clamp(stick_x + lx, -1.0f, 1.0f);
             if (std::abs(ly) > 0.01f) stick_y = std::clamp(stick_y + ly, -1.0f, 1.0f);
+            break;
+        }
 
-            if (pad.east_a) pad_buttons |= N64_Z;
-            if (pad.south_b) pad_buttons |= N64_R;
-            if (pad.west_y) roll_requested = true;
-            lock_btn = pad.north_x;
-            if (pad.start) pad_buttons |= N64_START;
-
-        } else if (config.scheme == CONTROL_SCHEME_DPAD_AIM) {
+        case AimDpadMode::DpadAim: {
             aim_dx = (pad.dpad_right ? 1 : 0) - (pad.dpad_left ? 1 : 0);
             aim_dy = (pad.dpad_up ? 1 : 0) - (pad.dpad_down ? 1 : 0);
             s_aim_ramp.update(aim_dx, aim_dy, stick_x, stick_y);
@@ -942,18 +981,40 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
             if (std::abs(ry) > 0.01f) stick_y = std::clamp(stick_y + ry, -1.0f, 1.0f);
 
             float lx = apply_axis_deadzone(pad.left_x, config.deadzone);
+            float ly = apply_axis_deadzone(-pad.left_y, config.deadzone);
+            if (std::abs(lx) > 0.01f) stick_x = std::clamp(stick_x + lx, -1.0f, 1.0f);
+            if (std::abs(ly) > 0.01f) stick_y = std::clamp(stick_y + ly, -1.0f, 1.0f);
             if (lx < -0.3f) pad_buttons |= N64_C_LEFT;
             else if (lx > 0.3f) pad_buttons |= N64_C_RIGHT;
 
-            if (pad.west_y) pad_buttons |= N64_C_LEFT;
-            if (pad.east_a) pad_buttons |= N64_C_RIGHT;
-            if (pad.r1 || pad.r2) pad_buttons |= N64_Z;
-            if (pad.l1) pad_buttons |= N64_R;
-            if (pad.south_b || pad.l2) roll_requested = true;
-            lock_btn = pad.north_x;
-            if (pad.start) pad_buttons |= N64_START;
+            if (is_action_pressed(pad, bindings.strafe_left)) pad_buttons |= N64_C_LEFT;
+            if (is_action_pressed(pad, bindings.strafe_right)) pad_buttons |= N64_C_RIGHT;
 
-        } else if (config.scheme == CONTROL_SCHEME_DPAD_STRAFE) {
+            static bool s_prev_dpad_switch = false;
+            static bool s_prev_dpad_prev = false;
+            static bool s_prev_dpad_next = false;
+            if (config.smart_lock_on != SMART_LOCK_OFF) {
+                bool sw = is_action_pressed(pad, bindings.switch_target);
+                bool prv = is_action_pressed(pad, bindings.prev_target);
+                bool nxt = is_action_pressed(pad, bindings.next_target);
+                if (sw && !s_prev_dpad_switch) {
+                    s_explicit_switch_dir.store(0, std::memory_order_relaxed);
+                    s_explicit_target_switch.store(true, std::memory_order_relaxed);
+                } else if (prv && !s_prev_dpad_prev) {
+                    s_explicit_switch_dir.store(-1, std::memory_order_relaxed);
+                    s_explicit_target_switch.store(true, std::memory_order_relaxed);
+                } else if (nxt && !s_prev_dpad_next) {
+                    s_explicit_switch_dir.store(1, std::memory_order_relaxed);
+                    s_explicit_target_switch.store(true, std::memory_order_relaxed);
+                }
+                s_prev_dpad_switch = sw;
+                s_prev_dpad_prev = prv;
+                s_prev_dpad_next = nxt;
+            }
+            break;
+        }
+
+        case AimDpadMode::FaceAim: {
             if (pad.dpad_left) pad_buttons |= N64_C_LEFT;
             if (pad.dpad_right) pad_buttons |= N64_C_RIGHT;
 
@@ -963,13 +1024,14 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
             s_flick_dx.store(aim_dx, std::memory_order_relaxed);
             s_flick_dy.store(aim_dy, std::memory_order_relaxed);
 
-            if (pad.r1) pad_buttons |= N64_Z;
-            if (pad.l1) pad_buttons |= N64_R;
-            if (pad.l2) roll_requested = true;
-            lock_btn = pad.r2;
-            if (pad.start) pad_buttons |= N64_START;
+            float lx = apply_axis_deadzone(pad.left_x, config.deadzone);
+            float ly = apply_axis_deadzone(-pad.left_y, config.deadzone);
+            if (std::abs(lx) > 0.01f) stick_x = std::clamp(stick_x + lx, -1.0f, 1.0f);
+            if (std::abs(ly) > 0.01f) stick_y = std::clamp(stick_y + ly, -1.0f, 1.0f);
+            break;
+        }
 
-        } else {
+        case AimDpadMode::TwinStick: {
             float aim_raw_x = config.swap_sticks ? pad.left_x : pad.right_x;
             float aim_raw_y = config.swap_sticks ? pad.left_y : pad.right_y;
             float move_raw_x = config.swap_sticks ? pad.right_x : pad.left_x;
@@ -994,23 +1056,39 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
             if (pad.dpad_up) pad_buttons |= N64_DPAD_UP;
             if (pad.dpad_down) pad_buttons |= N64_DPAD_DOWN;
 
-            if (pad.r1 || pad.r2) pad_buttons |= N64_Z;
-            if (pad.l1 || pad.l2) pad_buttons |= N64_R;
-            if (pad.north_x) roll_requested = true;
-            lock_btn = pad.east_a;
-            if (pad.south_b) pad_buttons |= N64_B;
-            if (pad.west_y) pad_buttons |= N64_L;
-            if (pad.start) pad_buttons |= N64_START;
+            if (is_action_pressed(pad, bindings.strafe_left)) pad_buttons |= N64_C_LEFT;
+            if (is_action_pressed(pad, bindings.strafe_right)) pad_buttons |= N64_C_RIGHT;
+
+            if (config.scheme == CONTROL_SCHEME_TWIN_STICK) {
+                if (pad.south_b) pad_buttons |= N64_B;
+                if (pad.west_y) pad_buttons |= N64_L;
+            }
+            break;
+        }
         }
 
+        if (is_action_pressed(pad, bindings.fire)) pad_buttons |= N64_Z;
+        if (is_action_pressed(pad, bindings.jump)) pad_buttons |= N64_R;
+        if (is_action_pressed(pad, bindings.roll)) roll_requested = true;
+        if (is_action_pressed(pad, bindings.roll_left)) {
+            roll_requested = true;
+            roll_dir = -1;
+        }
+        if (is_action_pressed(pad, bindings.roll_right)) {
+            roll_requested = true;
+            roll_dir = 1;
+        }
+        if (is_action_pressed(pad, bindings.pause)) pad_buttons |= N64_START;
+
+        bool lock_btn = is_action_pressed(pad, bindings.manual_aim);
         if (config.smart_lock_on == SMART_LOCK_OFF) {
             if (lock_btn) {
                 pad_buttons |= N64_A;
             }
         } else {
             bool want_lock_on = false;
-            if (config.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) {
-                want_lock_on = !(pad.l1 || pad.r1);
+            if (bindings.aim_mode == AimDpadMode::StrafeShift) {
+                want_lock_on = !lock_btn;
             } else if (config.smart_lock_on == SMART_LOCK_HOLD) {
                 want_lock_on = lock_btn;
             } else {
