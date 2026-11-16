@@ -1204,7 +1204,7 @@ extern "C" void snp_aim_stick(uint8_t* rdram, uint32_t reticle, int32_t raw_x, i
         if (len > 0.001f) {
             s_flick_norm_x = fx / len;
             s_flick_norm_y = fy / len;
-            s_flick_ticks_remaining = 2;
+            s_flick_ticks_remaining = 1;
         }
     }
 
