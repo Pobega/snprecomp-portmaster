@@ -155,6 +155,7 @@ SysfsRumble s_sysfs_rumble;
 
 struct RollStateMachine {
     bool roll_button_was_pressed = false;
+    int last_roll_dir = 0;
     uint16_t move_button = 0;
     int current_frame = 0;
     bool last_move_was_left = true;
@@ -232,6 +233,7 @@ std::atomic<uint32_t> s_reticle_tick{0};
 std::atomic<int> s_flick_dx{0};
 std::atomic<int> s_flick_dy{0};
 std::atomic<bool> s_explicit_target_switch{false};
+std::atomic<int> s_explicit_switch_dir{0};
 std::atomic<bool> s_recenter_requested{false};
 bool s_pulse_active = false;
 uint32_t s_pulse_start_tick = 0;
@@ -493,9 +495,11 @@ PhysicalPadState read_physical_pad_state() {
     return pad;
 }
 
-void update_roll_state(bool roll_requested, int aim_dx, uint16_t& buttons) {
-    bool roll_trigger = roll_requested && !s_roll_state.roll_button_was_pressed;
+void update_roll_state(bool roll_requested, int aim_dx, uint16_t& buttons, int roll_dir = 0) {
+    bool roll_trigger = (roll_requested && !s_roll_state.roll_button_was_pressed) ||
+                        (roll_dir != 0 && roll_dir != s_roll_state.last_roll_dir);
     s_roll_state.roll_button_was_pressed = roll_requested;
+    s_roll_state.last_roll_dir = roll_dir;
 
     if ((buttons & N64_C_LEFT) && !(buttons & N64_C_RIGHT)) {
         s_roll_state.last_move_was_left = true;
@@ -504,7 +508,11 @@ void update_roll_state(bool roll_requested, int aim_dx, uint16_t& buttons) {
     }
 
     if (s_roll_state.move_button == 0 && roll_trigger) {
-        if ((buttons & (N64_C_LEFT | N64_C_RIGHT)) == 0) {
+        if (roll_dir < 0) {
+            s_roll_state.last_move_was_left = true;
+        } else if (roll_dir > 0) {
+            s_roll_state.last_move_was_left = false;
+        } else if ((buttons & (N64_C_LEFT | N64_C_RIGHT)) == 0) {
             if (aim_dx < 0) {
                 s_roll_state.last_move_was_left = true;
             } else if (aim_dx > 0) {
@@ -771,6 +779,7 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     float stick_x = 0.0f;
     float stick_y = 0.0f;
     bool roll_requested = false;
+    int roll_dir = 0;
 
     bool in_combat = is_gameplay_reticle_active();
 
@@ -817,6 +826,7 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
         s_flick_dx.store(0, std::memory_order_relaxed);
         s_flick_dy.store(0, std::memory_order_relaxed);
         s_explicit_target_switch.store(false, std::memory_order_relaxed);
+        s_explicit_switch_dir.store(0, std::memory_order_relaxed);
     } else {
         // Stage Combat Context
         int aim_dx = 0;
@@ -863,9 +873,11 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
             if (pad.start) pad_buttons |= N64_START;
 
         } else if (config.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) {
-            bool aim_shift = pad.l1 || pad.l2;
+            bool aim_shift = pad.l1 || pad.r1;
             static bool s_prev_shift_x = false;
             static bool s_prev_strafe_x = false;
+            static bool s_prev_l2 = false;
+            static bool s_prev_r2 = false;
 
             if (aim_shift) {
                 aim_dx = (pad.dpad_right ? 1 : 0) - (pad.dpad_left ? 1 : 0);
@@ -887,19 +899,31 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
 
                 if (pad.north_x && !s_prev_strafe_x) {
                     if (config.smart_lock_on != SMART_LOCK_OFF) {
+                        s_explicit_switch_dir.store(0, std::memory_order_relaxed);
+                        s_explicit_target_switch.store(true, std::memory_order_relaxed);
+                    }
+                }
+                if (config.smart_lock_on != SMART_LOCK_OFF) {
+                    if (pad.l2 && !s_prev_l2) {
+                        s_explicit_switch_dir.store(-1, std::memory_order_relaxed);
+                        s_explicit_target_switch.store(true, std::memory_order_relaxed);
+                    } else if (pad.r2 && !s_prev_r2) {
+                        s_explicit_switch_dir.store(1, std::memory_order_relaxed);
                         s_explicit_target_switch.store(true, std::memory_order_relaxed);
                     }
                 }
             }
             s_prev_shift_x = aim_shift && pad.north_x;
             s_prev_strafe_x = !aim_shift && pad.north_x;
+            s_prev_l2 = pad.l2;
+            s_prev_r2 = pad.r2;
 
             float lx = apply_axis_deadzone(pad.left_x, config.deadzone);
             float ly = apply_axis_deadzone(-pad.left_y, config.deadzone);
             if (std::abs(lx) > 0.01f) stick_x = std::clamp(stick_x + lx, -1.0f, 1.0f);
             if (std::abs(ly) > 0.01f) stick_y = std::clamp(stick_y + ly, -1.0f, 1.0f);
 
-            if (pad.east_a || pad.r1 || pad.r2) pad_buttons |= N64_Z;
+            if (pad.east_a) pad_buttons |= N64_Z;
             if (pad.south_b) pad_buttons |= N64_R;
             if (pad.west_y) roll_requested = true;
             lock_btn = pad.north_x;
@@ -986,7 +1010,7 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
         } else {
             bool want_lock_on = false;
             if (config.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) {
-                want_lock_on = !(pad.l1 || pad.l2);
+                want_lock_on = !(pad.l1 || pad.r1);
             } else if (config.smart_lock_on == SMART_LOCK_HOLD) {
                 want_lock_on = lock_btn;
             } else {
@@ -1010,7 +1034,7 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
             }
         }
 
-        update_roll_state(roll_requested, aim_dx, pad_buttons);
+        update_roll_state(roll_requested, aim_dx, pad_buttons, roll_dir);
     }
 
     *buttons = pad_buttons;
@@ -1152,12 +1176,14 @@ extern "C" void snp_aim_stick(uint8_t* rdram, uint32_t reticle, int32_t raw_x, i
         s_flick_ticks_remaining = 0;
         s_auto_acquire_tick = 0;
         snp::handheld::s_explicit_target_switch.store(false, std::memory_order_relaxed);
+        snp::handheld::s_explicit_switch_dir.store(0, std::memory_order_relaxed);
         return;
     }
 
     int flick_dx = snp::handheld::s_flick_dx.load(std::memory_order_relaxed);
     int flick_dy = snp::handheld::s_flick_dy.load(std::memory_order_relaxed);
     bool explicit_switch = snp::handheld::s_explicit_target_switch.exchange(false, std::memory_order_relaxed);
+    int explicit_dir = snp::handheld::s_explicit_switch_dir.exchange(0, std::memory_order_relaxed);
 
     bool new_flick_direction = (flick_dx != s_prev_flick_dx || flick_dy != s_prev_flick_dy) && (flick_dx != 0 || flick_dy != 0);
     s_prev_flick_dx = flick_dx;
@@ -1166,7 +1192,10 @@ extern "C" void snp_aim_stick(uint8_t* rdram, uint32_t reticle, int32_t raw_x, i
     if (new_flick_direction || explicit_switch) {
         float fx = static_cast<float>(flick_dx);
         float fy = static_cast<float>(flick_dy);
-        if (explicit_switch && fx == 0.0f && fy == 0.0f) {
+        if (explicit_switch && explicit_dir != 0) {
+            fx = static_cast<float>(explicit_dir);
+            fy = 0.0f;
+        } else if (explicit_switch && fx == 0.0f && fy == 0.0f) {
             static int s_explicit_dir = 1;
             s_explicit_dir = -s_explicit_dir;
             fx = static_cast<float>(s_explicit_dir);
