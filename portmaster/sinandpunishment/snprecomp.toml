@@ -17,15 +17,16 @@ sfx_volume = 100
 
 [controls]
 # Scheme:
-#   "auto"               - Auto-detect: Twin Stick if 2+ sticks, else Stickless: Strafe + Shift
-#   "dpad_strafe_shift"  - Stickless: Strafe + Shift: D-Pad strafes, Hold L1/L2 + D-Pad aims (X recenters/switches), A/R1/R2 fire, B jump, Y roll
-#   "bumper_strafe"      - Stickless: Bumper Strafe: D-Pad aims, L1/R1 strafe, A/Y/R2 fire/sword, B jump, X/L2 lock-on
-#   "face_strafe"        - Stickless: Face Strafe: D-Pad aims, Y/B strafe, A roll, R1/R2 fire, L1/X jump, L2 lock-on
-#   "dpad_aim"           - Legacy: D-Pad Aim: D-Pad aims, Y/A strafe, R1/R2 fire, L1 jump, B/L2 roll, X lock-on
-#   "dpad_strafe"        - Legacy: Face Aim: D-Pad strafes, Face diamond (X/B/Y/A) aims, R1 fire, L1 jump, L2 roll, R2 lock-on
-#   "twin_stick"         - Twin Stick: Left stick strafes, Right stick aims, R1/R2 fire, L1/L2 jump, X roll, A lock-on
+#   "auto"                 - Auto-detect: Twin Stick if 2+ sticks, else Stickless: Strafe + Shift
+#   "dpad_strafe_shift"    - Stickless: Strafe + Shift: D-Pad strafes, Hold L1/L2 + D-Pad aims (X recenters/switches), A fire, B jump, Y roll
+#   "bumper_strafe"        - Stickless: Bumper Strafe: D-Pad aims, L1/R1 strafe, A/R2 fire, B jump, X/L2 lock-on
+#   "face_strafe"          - Stickless: Face Strafe: D-Pad aims, Y/B strafe, A roll, R1/R2 fire, L1/X jump, L2 lock-on
+#   "dpad_aim"             - Legacy: D-Pad Aim: D-Pad aims, Y/A strafe, R1/R2 fire, L1 jump, B/L2 roll, X lock-on
+#   "dpad_strafe"          - Legacy: Face Aim: D-Pad strafes, Face diamond (X/B/Y/A) aims, R1 fire, L1 jump, L2 roll, R2 lock-on
+#   "twin_stick"           - Twin Stick: Left stick strafes, Right stick aims, R1/A fire, L1/B jump, L2/Y roll, R2/X lock-on
+#   "twin_stick_swapped"   - Twin Stick: Left stick aims, Right stick strafes, R1/A fire, L1/B jump, L2/Y roll, R2/X lock-on
 scheme = "auto"
-# Smart Lock-On: "auto" (Stickless default: always lock, hold to manual aim), "hold" (hold button to lock), "off" (N64 toggle)
+# Smart Lock-On: "auto" ("auto" = Off/N64 Toggle on stick devices, Auto/Hold=Manual on stickless devices; "off", "hold", "always")
 smart_lock_on = "auto"
 # Aim Curve: "s_curve" (fine tap precision + smooth ramp), "linear"
 aim_curve = "s_curve"

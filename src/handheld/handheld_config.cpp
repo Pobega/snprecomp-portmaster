@@ -27,22 +27,37 @@ HandheldConfig& get_mutable_config() {
     return g_config;
 }
 
-std::string resolve_default_control_scheme() {
+int get_env_analog_sticks() {
     const char* env_sticks = std::getenv("ANALOG_STICKS");
     if (!env_sticks || env_sticks[0] == '\0') {
         env_sticks = std::getenv("SNP_ANALOG_STICKS");
     }
-    if (env_sticks) {
+    if (env_sticks && env_sticks[0] != '\0') {
         try {
-            int sticks = std::stoi(env_sticks);
-            if (sticks >= 2) {
-                return CONTROL_SCHEME_TWIN_STICK;
-            }
+            return std::stoi(env_sticks);
         } catch (...) {
-            // Unparseable stick count; default to stickless layout.
+            return -1;
         }
     }
+    return -1;
+}
+
+std::string resolve_default_control_scheme() {
+    int sticks = get_env_analog_sticks();
+    if (sticks >= 2) {
+        return CONTROL_SCHEME_TWIN_STICK;
+    }
     return CONTROL_SCHEME_DPAD_STRAFE_SHIFT;
+}
+
+std::string resolve_default_smart_lock_on(const std::string& scheme) {
+    if (scheme == CONTROL_SCHEME_TWIN_STICK || scheme == CONTROL_SCHEME_TWIN_STICK_SWAPPED) {
+        return SMART_LOCK_OFF;
+    }
+    if (get_env_analog_sticks() >= 1) {
+        return SMART_LOCK_OFF;
+    }
+    return SMART_LOCK_ALWAYS;
 }
 
 ControlBindings get_preset_bindings(const std::string& scheme) {
@@ -80,12 +95,14 @@ ControlBindings get_preset_bindings(const std::string& scheme) {
         b.roll = {PhysicalButton::L2};
         b.manual_aim = {PhysicalButton::R2};
         b.pause = {PhysicalButton::Start};
-    } else if (scheme == CONTROL_SCHEME_TWIN_STICK) {
-        b.aim_mode = AimDpadMode::TwinStick;
-        b.fire = {PhysicalButton::R1, PhysicalButton::R2};
-        b.jump = {PhysicalButton::L1, PhysicalButton::L2};
-        b.roll = {PhysicalButton::X};
-        b.manual_aim = {PhysicalButton::A};
+    } else if (scheme == CONTROL_SCHEME_TWIN_STICK || scheme == CONTROL_SCHEME_TWIN_STICK_SWAPPED) {
+        b.aim_mode = (scheme == CONTROL_SCHEME_TWIN_STICK_SWAPPED)
+            ? AimDpadMode::TwinStickSwapped
+            : AimDpadMode::TwinStick;
+        b.fire = {PhysicalButton::R1, PhysicalButton::A};
+        b.jump = {PhysicalButton::L1, PhysicalButton::B};
+        b.roll = {PhysicalButton::L2, PhysicalButton::Y};
+        b.manual_aim = {PhysicalButton::R2, PhysicalButton::X};
         b.pause = {PhysicalButton::Start};
     } else {
         b.aim_mode = AimDpadMode::StrafeShift;
@@ -157,6 +174,7 @@ const char* aim_dpad_mode_to_string(AimDpadMode mode) {
     case AimDpadMode::DpadAim: return "dpad_aim";
     case AimDpadMode::FaceAim: return "face_aim";
     case AimDpadMode::TwinStick: return "twin_stick";
+    case AimDpadMode::TwinStickSwapped: return "twin_stick_swapped";
     default: return "strafe_shift";
     }
 }
@@ -167,6 +185,7 @@ AimDpadMode string_to_aim_dpad_mode(const std::string& str) {
     for (char ch : str) {
         lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
     }
+    if (lower == "twin_stick_swapped" || lower == "twin_swapped") return AimDpadMode::TwinStickSwapped;
     if (lower == "dpad_aim" || lower == "dpad") return AimDpadMode::DpadAim;
     if (lower == "face_aim" || lower == "face") return AimDpadMode::FaceAim;
     if (lower == "twin_stick" || lower == "twin") return AimDpadMode::TwinStick;
@@ -179,6 +198,7 @@ const char* aim_dpad_mode_display_name(AimDpadMode mode) {
     case AimDpadMode::DpadAim: return "D-Pad Aim";
     case AimDpadMode::FaceAim: return "Face Aim";
     case AimDpadMode::TwinStick: return "Twin Stick";
+    case AimDpadMode::TwinStickSwapped: return "Twin Stick: Swapped";
     default: return "Strafe + Shift";
     }
 }
@@ -225,9 +245,9 @@ void save_config(const std::string& config_path) {
         << "music_volume = " << g_config.audio.music_volume << "\n"
         << "sfx_volume = " << g_config.audio.sfx_volume << "\n\n"
         << "[controls]\n"
-        << "# Scheme: \"auto\" (detect sticks), \"dpad_strafe_shift\" (Stickless default), \"bumper_strafe\", \"face_strafe\", \"dpad_aim\", \"dpad_strafe\", \"twin_stick\", or \"custom\"\n"
+        << "# Scheme: \"auto\" (detect sticks), \"dpad_strafe_shift\" (Stickless default), \"bumper_strafe\", \"face_strafe\", \"dpad_aim\", \"dpad_strafe\", \"twin_stick\", \"twin_stick_swapped\", or \"custom\"\n"
         << "scheme = \"" << g_config.controls.scheme << "\"\n"
-        << "# Smart Lock-On: \"auto\" (Hold=Manual default), \"hold\" (Hold=Lock), or \"off\" (N64 toggle)\n"
+        << "# Smart Lock-On: \"auto\" (detect sticks), \"always\" (Hold=Manual default on stickless), \"hold\" (Hold=Lock), or \"off\" (N64 toggle default on stick devices)\n"
         << "smart_lock_on = \"" << g_config.controls.smart_lock_on << "\"\n"
         << "aim_curve = \"" << g_config.controls.aim_curve << "\"\n"
         << "# Face layout: \"nintendo\" (East A, South B, North X, West Y) or \"positional\" (swapped A<->B, X<->Y)\n"
@@ -239,7 +259,7 @@ void save_config(const std::string& config_path) {
         << "rumble_strength = " << g_config.controls.rumble_strength << "\n"
         << "swap_sticks = " << (g_config.controls.swap_sticks ? "true" : "false") << "\n\n"
         << "[controls.bindings]\n"
-        << "# Aim / D-Pad Mode: \"strafe_shift\", \"dpad_aim\", \"face_aim\", or \"twin_stick\"\n"
+        << "# Aim / D-Pad Mode: \"strafe_shift\", \"dpad_aim\", \"face_aim\", \"twin_stick\", or \"twin_stick_swapped\"\n"
         << "aim_mode = \"" << aim_dpad_mode_to_string(g_config.controls.bindings.aim_mode) << "\"\n"
         << "fire = [\"" << physical_button_to_string(g_config.controls.bindings.fire.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.fire.secondary) << "\"]\n"
         << "jump = [\"" << physical_button_to_string(g_config.controls.bindings.jump.primary) << "\", \"" << physical_button_to_string(g_config.controls.bindings.jump.secondary) << "\"]\n"
@@ -277,6 +297,7 @@ void save_config(const std::string& config_path) {
 
 bool load_config(const std::string& config_path) {
     g_config.controls.scheme = resolve_default_control_scheme();
+    g_config.controls.smart_lock_on = resolve_default_smart_lock_on(g_config.controls.scheme);
 
     if (!std::filesystem::exists(config_path)) {
         save_config(config_path);
@@ -331,6 +352,7 @@ bool load_config(const std::string& config_path) {
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_AIM &&
                 g_config.controls.scheme != CONTROL_SCHEME_DPAD_STRAFE &&
                 g_config.controls.scheme != CONTROL_SCHEME_TWIN_STICK &&
+                g_config.controls.scheme != CONTROL_SCHEME_TWIN_STICK_SWAPPED &&
                 g_config.controls.scheme != CONTROL_SCHEME_CUSTOM) {
                 g_config.controls.scheme = resolve_default_control_scheme();
             }
@@ -385,10 +407,12 @@ bool load_config(const std::string& config_path) {
                 }
             }
 
-            if (g_config.controls.smart_lock_on != SMART_LOCK_AUTO &&
-                g_config.controls.smart_lock_on != SMART_LOCK_HOLD &&
-                g_config.controls.smart_lock_on != SMART_LOCK_OFF) {
-                g_config.controls.smart_lock_on = SMART_LOCK_AUTO;
+            if (g_config.controls.smart_lock_on == SMART_LOCK_AUTO) {
+                g_config.controls.smart_lock_on = resolve_default_smart_lock_on(g_config.controls.scheme);
+            } else if (g_config.controls.smart_lock_on != SMART_LOCK_ALWAYS &&
+                       g_config.controls.smart_lock_on != SMART_LOCK_HOLD &&
+                       g_config.controls.smart_lock_on != SMART_LOCK_OFF) {
+                g_config.controls.smart_lock_on = resolve_default_smart_lock_on(g_config.controls.scheme);
             }
 
             if (g_config.controls.aim_curve != AIM_CURVE_S_CURVE &&

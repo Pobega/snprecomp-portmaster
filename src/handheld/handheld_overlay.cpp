@@ -150,13 +150,14 @@ CustomMenuRow s_listen_row = CustomMenuRow::Fire;
 uint32_t s_listen_start_time = 0;
 constexpr uint32_t LISTEN_TIMEOUT_MS = 3000;
 
-constexpr std::array<const char*, 6> PRESET_NAMES = {
+constexpr std::array<const char*, 7> PRESET_NAMES = {
     CONTROL_SCHEME_DPAD_STRAFE_SHIFT,
     CONTROL_SCHEME_BUMPER_STRAFE,
     CONTROL_SCHEME_FACE_STRAFE,
     CONTROL_SCHEME_DPAD_AIM,
     CONTROL_SCHEME_DPAD_STRAFE,
     CONTROL_SCHEME_TWIN_STICK,
+    CONTROL_SCHEME_TWIN_STICK_SWAPPED,
 };
 
 const char* get_preset_display_name(const std::string& scheme) {
@@ -166,6 +167,7 @@ const char* get_preset_display_name(const std::string& scheme) {
     if (scheme == CONTROL_SCHEME_DPAD_AIM) return "D-Pad Aim";
     if (scheme == CONTROL_SCHEME_DPAD_STRAFE) return "Face Aim";
     if (scheme == CONTROL_SCHEME_TWIN_STICK) return "Twin Stick";
+    if (scheme == CONTROL_SCHEME_TWIN_STICK_SWAPPED) return "Twin Stick: Swapped";
     return "Custom";
 }
 
@@ -534,6 +536,7 @@ std::string get_row_value(MainMenuRow row, const HandheldConfig& cfg) {
         if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_AIM) return "Legacy: D-Pad Aim";
         if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE) return "Legacy: Face Aim";
         if (cfg.controls.scheme == CONTROL_SCHEME_TWIN_STICK) return "Twin Stick";
+        if (cfg.controls.scheme == CONTROL_SCHEME_TWIN_STICK_SWAPPED) return "Twin Stick: Swapped";
         if (cfg.controls.scheme == CONTROL_SCHEME_CUSTOM) return "Custom";
         return "Custom";
     case MainMenuRow::CustomizeControls:
@@ -625,13 +628,14 @@ void cycle_row_value(MainMenuRow row, bool forward) {
     auto& cfg = get_mutable_config();
     switch (row) {
     case MainMenuRow::ControlScheme: {
-        const std::array<std::string, 7> schemes = {
+        const std::array<std::string, 8> schemes = {
             CONTROL_SCHEME_DPAD_STRAFE_SHIFT,
             CONTROL_SCHEME_BUMPER_STRAFE,
             CONTROL_SCHEME_FACE_STRAFE,
             CONTROL_SCHEME_DPAD_AIM,
             CONTROL_SCHEME_DPAD_STRAFE,
             CONTROL_SCHEME_TWIN_STICK,
+            CONTROL_SCHEME_TWIN_STICK_SWAPPED,
             CONTROL_SCHEME_CUSTOM,
         };
         auto it = std::find(schemes.begin(), schemes.end(), cfg.controls.scheme);
@@ -641,6 +645,12 @@ void cycle_row_value(MainMenuRow row, bool forward) {
         cfg.controls.scheme = schemes[idx];
         if (cfg.controls.scheme != CONTROL_SCHEME_CUSTOM) {
             cfg.controls.bindings = get_preset_bindings(cfg.controls.scheme);
+            if (cfg.controls.scheme == CONTROL_SCHEME_TWIN_STICK ||
+                cfg.controls.scheme == CONTROL_SCHEME_TWIN_STICK_SWAPPED) {
+                cfg.controls.smart_lock_on = SMART_LOCK_OFF;
+            } else if (cfg.controls.scheme == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) {
+                cfg.controls.smart_lock_on = SMART_LOCK_ALWAYS;
+            }
         }
         break;
     }
@@ -650,11 +660,13 @@ void cycle_row_value(MainMenuRow row, bool forward) {
         break;
     case MainMenuRow::SmartLockOn: {
         const std::array<std::string, 3> modes = {
-            SMART_LOCK_AUTO,
-            SMART_LOCK_HOLD,
             SMART_LOCK_OFF,
+            SMART_LOCK_HOLD,
+            SMART_LOCK_ALWAYS,
         };
-        auto it = std::find(modes.begin(), modes.end(), cfg.controls.smart_lock_on);
+        std::string cur_lock = (cfg.controls.smart_lock_on == SMART_LOCK_AUTO)
+            ? SMART_LOCK_ALWAYS : cfg.controls.smart_lock_on;
+        auto it = std::find(modes.begin(), modes.end(), cur_lock);
         int idx = (it != modes.end()) ? static_cast<int>(std::distance(modes.begin(), it)) : 0;
         idx = forward ? (idx + 1) % 3 : (idx + 2) % 3;
         cfg.controls.smart_lock_on = modes[idx];
@@ -840,7 +852,7 @@ void build_main_menu_mesh(int win_w, int win_h) {
     add_solid_rect(box_x0, legend_box_y0, box_x1, legend_box_y1, COLOR_BOX_BG);
     add_outline_rect(box_x0, legend_box_y0, box_x1, legend_box_y1, 1.0f, COLOR_SEPARATOR);
 
-    std::string lock_desc = (cfg.controls.smart_lock_on == SMART_LOCK_AUTO)
+    std::string lock_desc = (cfg.controls.smart_lock_on == SMART_LOCK_AUTO || cfg.controls.smart_lock_on == SMART_LOCK_ALWAYS)
         ? "Auto"
         : ((cfg.controls.smart_lock_on == SMART_LOCK_OFF) ? "Toggle" : "Hold");
 
@@ -867,12 +879,13 @@ void build_main_menu_mesh(int win_w, int win_h) {
                     " | Jump: " + std::string(physical_button_display_name(cfg.controls.bindings.jump.primary)) +
                     " | Select [Customize Controls] to edit";
     } else {
-        if (cfg.controls.swap_sticks) {
-            legend_l1 = "Aim: Left Stick | Move: Right Stick | Fire: R1/R2";
+        bool swapped = cfg.controls.swap_sticks || (cfg.controls.scheme == CONTROL_SCHEME_TWIN_STICK_SWAPPED);
+        if (swapped) {
+            legend_l1 = "Aim: Left Stick | Move: Right Stick | Fire: R1/A";
         } else {
-            legend_l1 = "Aim: Right Stick | Move: Left Stick | Fire: R1/R2";
+            legend_l1 = "Aim: Right Stick | Move: Left Stick | Fire: R1/A";
         }
-        legend_l2 = "Jump: L1/L2 | Roll: X | Lock-On: A (" + lock_desc + ") | Start: Pause";
+        legend_l2 = "Jump: L1/B | Roll: L2/Y | Lock-On: R2/X (" + lock_desc + ") | Start: Pause";
     }
 
     add_string(box_x0 + 10.0f, legend_box_y0 + 5.0f, 1.0f, "ACTIVE CONTROLS (" + get_row_value(MainMenuRow::ControlScheme, cfg) + "):", COLOR_GOLD);
@@ -1122,6 +1135,16 @@ void update_overlay_input(bool up, bool down, bool left, bool right,
             return;
         }
 
+        auto apply_preset_to_custom = [&](const std::string& preset) {
+            cfg.controls.bindings = get_preset_bindings(preset);
+            cfg.controls.scheme = CONTROL_SCHEME_CUSTOM;
+            if (preset == CONTROL_SCHEME_TWIN_STICK || preset == CONTROL_SCHEME_TWIN_STICK_SWAPPED) {
+                cfg.controls.smart_lock_on = SMART_LOCK_OFF;
+            } else if (preset == CONTROL_SCHEME_DPAD_STRAFE_SHIFT) {
+                cfg.controls.smart_lock_on = SMART_LOCK_ALWAYS;
+            }
+        };
+
         if (cur_row == CustomMenuRow::Back) {
             if (btn_a || btn_start) {
                 s_current_page = MenuPage::Main;
@@ -1130,26 +1153,23 @@ void update_overlay_input(bool up, bool down, bool left, bool right,
             }
         } else if (cur_row == CustomMenuRow::ResetToPreset) {
             if (btn_a) {
-                cfg.controls.bindings = get_preset_bindings(PRESET_NAMES[s_load_preset_idx]);
-                cfg.controls.scheme = CONTROL_SCHEME_CUSTOM;
+                apply_preset_to_custom(PRESET_NAMES[s_load_preset_idx]);
             }
         } else if (cur_row == CustomMenuRow::LoadPreset) {
             if (left || right) {
                 int delta = right ? 1 : -1;
                 int count = static_cast<int>(PRESET_NAMES.size());
                 s_load_preset_idx = (s_load_preset_idx + delta + count) % count;
-                cfg.controls.bindings = get_preset_bindings(PRESET_NAMES[s_load_preset_idx]);
-                cfg.controls.scheme = CONTROL_SCHEME_CUSTOM;
+                apply_preset_to_custom(PRESET_NAMES[s_load_preset_idx]);
             } else if (btn_a) {
-                cfg.controls.bindings = get_preset_bindings(PRESET_NAMES[s_load_preset_idx]);
-                cfg.controls.scheme = CONTROL_SCHEME_CUSTOM;
+                apply_preset_to_custom(PRESET_NAMES[s_load_preset_idx]);
             }
         } else if (cur_row == CustomMenuRow::AimMode) {
             if (left || right || btn_a) {
                 int mode_idx = static_cast<int>(cfg.controls.bindings.aim_mode);
-                int count = 4;
+                constexpr int AIM_MODE_COUNT = 5;
                 int delta = left ? -1 : 1;
-                mode_idx = (mode_idx + delta + count) % count;
+                mode_idx = (mode_idx + delta + AIM_MODE_COUNT) % AIM_MODE_COUNT;
                 cfg.controls.bindings.aim_mode = static_cast<AimDpadMode>(mode_idx);
                 cfg.controls.scheme = CONTROL_SCHEME_CUSTOM;
             }

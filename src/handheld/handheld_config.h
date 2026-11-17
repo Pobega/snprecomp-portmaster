@@ -17,6 +17,7 @@ constexpr const char* CONTROL_SCHEME_DPAD_STRAFE_SHIFT = "dpad_strafe_shift";
 constexpr const char* CONTROL_SCHEME_DPAD_AIM = "dpad_aim";
 constexpr const char* CONTROL_SCHEME_DPAD_STRAFE = "dpad_strafe";
 constexpr const char* CONTROL_SCHEME_TWIN_STICK = "twin_stick";
+constexpr const char* CONTROL_SCHEME_TWIN_STICK_SWAPPED = "twin_stick_swapped";
 constexpr const char* CONTROL_SCHEME_CUSTOM = "custom";
 
 enum class PhysicalButton : uint8_t {
@@ -37,6 +38,7 @@ enum class AimDpadMode : uint8_t {
     DpadAim,
     FaceAim,
     TwinStick,
+    TwinStickSwapped,
 };
 
 struct ActionBinding {
@@ -69,6 +71,7 @@ struct ControlBindings {
     ActionBinding pause{PhysicalButton::Start};
 };
 
+constexpr const char* SMART_LOCK_ALWAYS = "always";
 constexpr const char* SMART_LOCK_HOLD = "hold";
 constexpr const char* SMART_LOCK_AUTO = "auto";
 constexpr const char* SMART_LOCK_OFF = "off";
@@ -149,6 +152,9 @@ struct HandheldConfig {
     RomSettings rom;
     RetroAchievementsConfig retroachievements;
 };
+
+std::string resolve_default_control_scheme();
+std::string resolve_default_smart_lock_on(const std::string& scheme);
 
 ControlBindings get_preset_bindings(const std::string& scheme);
 const char* physical_button_to_string(PhysicalButton btn);

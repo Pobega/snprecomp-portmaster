@@ -1010,10 +1010,12 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
             break;
         }
 
-        case AimDpadMode::TwinStick: {
-            float aim_raw_x = config.swap_sticks ? pad.left_x : pad.right_x;
-            float aim_raw_y = config.swap_sticks ? pad.left_y : pad.right_y;
-            float move_raw_x = config.swap_sticks ? pad.right_x : pad.left_x;
+        case AimDpadMode::TwinStick:
+        case AimDpadMode::TwinStickSwapped: {
+            bool swap = config.swap_sticks || (bindings.aim_mode == AimDpadMode::TwinStickSwapped);
+            float aim_raw_x = swap ? pad.left_x : pad.right_x;
+            float aim_raw_y = swap ? pad.left_y : pad.right_y;
+            float move_raw_x = swap ? pad.right_x : pad.left_x;
 
             stick_x = apply_axis_deadzone(aim_raw_x, config.deadzone);
             stick_y = apply_axis_deadzone(-aim_raw_y, config.deadzone);
@@ -1037,11 +1039,6 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
 
             if (is_action_pressed(pad, bindings.strafe_left)) pad_buttons |= N64_C_LEFT;
             if (is_action_pressed(pad, bindings.strafe_right)) pad_buttons |= N64_C_RIGHT;
-
-            if (config.scheme == CONTROL_SCHEME_TWIN_STICK) {
-                if (pad.south_b) pad_buttons |= N64_B;
-                if (pad.west_y) pad_buttons |= N64_L;
-            }
             break;
         }
         }
