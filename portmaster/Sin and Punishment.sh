@@ -43,8 +43,8 @@ if [ -z "$SSL_CERT_FILE" ] && [ -z "$CURL_CA_BUNDLE" ]; then
 fi
 
 shopt -s nullglob nocaseglob
-rom_files=("$GAMEDIR/roms/"*.{z64,n64,v64} "$GAMEDIR/"*.{z64,n64,v64})
-raw_user_patches=("$GAMEDIR/roms/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff} "$GAMEDIR/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff})
+rom_files=("$GAMEDIR/roms/"*.{z64,n64,v64})
+user_patches=("$GAMEDIR/roms/"*.{bps,ups,ips,xdelta,xdelta3,vcdiff})
 shopt -u nullglob nocaseglob
 
 if [ ${#rom_files[@]} -eq 0 ] && [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] && [ ! -f "$GAMEDIR/snp.n64.jp.1.0.z64" ]; then
@@ -52,13 +52,6 @@ if [ ${#rom_files[@]} -eq 0 ] && [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] && [ ! -
   pm_finish
   exit 1
 fi
-
-user_patches=()
-for p in "${raw_user_patches[@]}"; do
-  if [ "$(basename "$p")" != "snp.patch" ]; then
-    user_patches+=("$p")
-  fi
-done
 
 if [ -f "$GAMEDIR/snp.patch" ] || \
    [ ! -x "$GAMEDIR/$BINARY" ] || \
@@ -78,7 +71,9 @@ if [ -f "$GAMEDIR/snp.patch" ] || \
     exit 1
   fi
 
-  if [ ! -x "$GAMEDIR/$BINARY" ] || ( [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] && [ ! -f "$GAMEDIR/snp.n64.jp.1.0.z64" ] ); then
+  patch_fail_msg="$(sed -n 's/^PATCH_FAIL_MSG://p' "$GAMEDIR/patchlog.txt" 2>/dev/null | tail -n 1 || true)"
+  if [ -n "$patch_fail_msg" ] || [ ! -x "$GAMEDIR/$BINARY" ] || ( [ ! -f "$GAMEDIR/snp.n64.en.fan.z64" ] && [ ! -f "$GAMEDIR/snp.n64.jp.1.0.z64" ] ); then
+    pm_show_error "${patch_fail_msg:-ROM verification or patching failed. Check patchlog.txt in ports/sinandpunishment/ for details.}" --title "Patching Failed"
     pm_finish
     exit 1
   fi

@@ -57,6 +57,7 @@ int handle_normalize(const std::filesystem::path& in_rom, const std::filesystem:
         return 1;
     }
 
+    std::cerr << "snp-patch: normalized " << raw_rom.size() << " bytes to " << out_z64.filename().string() << "\n";
     return 0;
 }
 
@@ -88,8 +89,12 @@ int handle_setup_rom(const std::filesystem::path& in_rom, const std::filesystem:
             std::cerr << "snp-patch: failed applying translation patch: " << err << "\n";
             return 1;
         }
-        if (!already_patched) {
+        if (already_patched) {
+            std::cerr << "snp-patch: translation patch already applied (" << patch_file.filename().string() << ")\n";
+        } else {
             z64_rom = std::move(patched_z64);
+            std::cerr << "snp-patch: applied translation patch " << patch_file.filename().string()
+                      << " (" << z64_rom.size() << " bytes)\n";
         }
     }
 
@@ -117,11 +122,15 @@ int handle_setup_rom(const std::filesystem::path& in_rom, const std::filesystem:
         }
     }
 
-    if (!skip_write) {
+    if (skip_write) {
+        std::cerr << "snp-patch: reusing matching stored ROM " << target_path.filename().string() << "\n";
+    } else {
         if (!snp::patch::write_file_atomic(target_path, z64_rom.data(), z64_rom.size(), err)) {
             std::cerr << "snp-patch: failed saving verified ROM: " << err << "\n";
             return 1;
         }
+        std::cerr << "snp-patch: stored verified ROM " << target_path.filename().string()
+                  << " (" << z64_rom.size() << " bytes)\n";
     }
 
     std::cout << "GAME_ID=" << game_id << "\n";
