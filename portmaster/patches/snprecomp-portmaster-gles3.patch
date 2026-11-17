@@ -6048,10 +6048,10 @@ index 0000000..7427b82
 +} // namespace snp::handheld
 diff --git a/src/handheld/handheld_input.cpp b/src/handheld/handheld_input.cpp
 new file mode 100644
-index 0000000..d379922
+index 0000000..0b9d7e3
 --- /dev/null
 +++ b/src/handheld/handheld_input.cpp
-@@ -0,0 +1,1364 @@
+@@ -0,0 +1,1343 @@
 +#include "handheld_input.h"
 +
 +#include <algorithm>
@@ -6111,10 +6111,7 @@ index 0000000..d379922
 +constexpr int SYSFS_MOTOR_MIN_UV = 500000;
 +constexpr int SYSFS_MOTOR_MAX_UV = 2200000;
 +constexpr uint32_t RETICLE_ACTIVE_TIMEOUT_MS = 150;
-+constexpr uint32_t LOAD_TABLE_ADDR = 0x800597ACu;
-+constexpr uint32_t LOAD_TABLE_STRIDE = 20u;
-+constexpr uint32_t FIRST_PLAYABLE_STAGE_ENTRY = 4u;
-+constexpr uint32_t LAST_PLAYABLE_STAGE_ENTRY = 13u;
++constexpr uint32_t DEMO_PLAYING_ADDR = 0x800D4F00u;
 +constexpr uint32_t PAUSE_STATE_ADDR = 0x80068A97u;
 +constexpr uint8_t PAUSE_STATE_UNPAUSED = 0u;
 +constexpr uint8_t RETICLE_MENU_CURSOR_FLAG = 0x20u;
@@ -6621,33 +6618,21 @@ index 0000000..d379922
 +    }
 +}
 +
-+bool is_playable_stage_overlay(const uint8_t* rdram) {
-+    if (rdram == nullptr || snp_in_front_end_menus()) {
-+        return false;
-+    }
-+    uint32_t rom = snp_overlay_area_rom();
-+    if (rom == 0) {
-+        return false;
-+    }
-+    for (uint32_t i = FIRST_PLAYABLE_STAGE_ENTRY; i <= LAST_PLAYABLE_STAGE_ENTRY; ++i) {
-+        uint32_t entry_rom = 0;
-+        std::memcpy(&entry_rom, rdram + ((LOAD_TABLE_ADDR + i * LOAD_TABLE_STRIDE) & 0x1FFFFFFFu), sizeof(uint32_t));
-+        if (entry_rom == rom) {
-+            return true;
-+        }
-+    }
-+    return false;
++bool is_stage_unpaused(const uint8_t* rdram) {
++    return read_rdram_byte(rdram, PAUSE_STATE_ADDR) == PAUSE_STATE_UNPAUSED &&
++           read_rdram_byte(rdram, DEMO_PLAYING_ADDR) == 0;
 +}
 +
-+bool is_stage_unpaused(const uint8_t* rdram) {
-+    return read_rdram_byte(rdram, PAUSE_STATE_ADDR) == PAUSE_STATE_UNPAUSED;
++bool is_active_stage_gameplay(const uint8_t* rdram) {
++    return rdram != nullptr &&
++           !snp_in_front_end_menus() &&
++           snp_overlay_area_rom() != 0 &&
++           is_stage_unpaused(rdram);
 +}
 +
 +bool is_stage_combat_reticle(const uint8_t* rdram, uint8_t reticle_flags) {
-+    if (!is_playable_stage_overlay(rdram) || !is_stage_unpaused(rdram)) {
-+        return false;
-+    }
-+    return (reticle_flags & RETICLE_MENU_CURSOR_FLAG) == 0;
++    return is_active_stage_gameplay(rdram) &&
++           (reticle_flags & RETICLE_MENU_CURSOR_FLAG) == 0;
 +}
 +
 +bool is_menu_cursor_active() {
@@ -6661,21 +6646,15 @@ index 0000000..d379922
 +} // namespace
 +
 +bool is_gameplay_reticle_active() {
-+    if (snp_in_front_end_menus()) {
-+        return false;
-+    }
 +    const uint8_t* rdram = s_rdram_ptr.load(std::memory_order_relaxed);
-+    if (rdram != nullptr) {
-+        if (!is_playable_stage_overlay(rdram) || !is_stage_unpaused(rdram)) {
-+            return false;
-+        }
++    if (!is_active_stage_gameplay(rdram)) {
++        return false;
 +    }
 +    uint32_t last = s_last_gameplay_reticle_ms.load(std::memory_order_relaxed);
 +    if (last == 0) {
 +        return false;
 +    }
-+    uint32_t now = SDL_GetTicks();
-+    return (now - last) <= RETICLE_ACTIVE_TIMEOUT_MS;
++    return (SDL_GetTicks() - last) <= RETICLE_ACTIVE_TIMEOUT_MS;
 +}
 +
 +void init_input() {
@@ -7227,7 +7206,7 @@ index 0000000..d379922
 +        return;
 +    }
 +    snp::handheld::s_rdram_ptr.store(rdram, std::memory_order_relaxed);
-+    if (snp::handheld::read_rdram_byte(rdram, 0x800D4F00u) != 0) {
++    if (snp::handheld::read_rdram_byte(rdram, snp::handheld::DEMO_PLAYING_ADDR) != 0) {
 +        return;
 +    }
 +
@@ -7270,7 +7249,7 @@ index 0000000..d379922
 +        return;
 +    }
 +    snp::handheld::s_rdram_ptr.store(rdram, std::memory_order_relaxed);
-+    if (snp::handheld::read_rdram_byte(rdram, 0x800D4F00u) != 0) {
++    if (snp::handheld::read_rdram_byte(rdram, snp::handheld::DEMO_PLAYING_ADDR) != 0) {
 +        return;
 +    }
 +
