@@ -3,8 +3,8 @@
 [video]
 # Aspect ratio: "expand" (widescreen full screen) or "original" (4:3 pillarboxed)
 aspect_ratio = "expand"
-# Resolution scale: 2 (native 480p) or 1 (original 240p)
-resolution_scale = 2
+# Resolution scale: 0 (Native window), 1 (240p), 2 (480p), 3 (720p), 4 (960p), or 5 (1200p)
+resolution_scale = 0
 vsync = true
 target_fps = 60
 sharp_textures = false

@@ -85,7 +85,10 @@ constexpr const char* ROM_PREFERRED_AUTO = "auto";
 constexpr const char* ROM_PREFERRED_EN = "en";
 constexpr const char* ROM_PREFERRED_JP = "jp";
 
-constexpr int DEFAULT_RESOLUTION_SCALE = 2;
+constexpr int RESOLUTION_SCALE_NATIVE = 0;
+constexpr int MIN_RESOLUTION_SCALE = 0;
+constexpr int MAX_RESOLUTION_SCALE = 5;
+constexpr int DEFAULT_RESOLUTION_SCALE = RESOLUTION_SCALE_NATIVE;
 constexpr int DEFAULT_TARGET_FPS = 60;
 constexpr int DEFAULT_VOLUME = 100;
 constexpr int DEFAULT_RUMBLE_STRENGTH = 100;
@@ -163,6 +166,7 @@ const char* physical_button_display_name(PhysicalButton btn);
 const char* aim_dpad_mode_to_string(AimDpadMode mode);
 AimDpadMode string_to_aim_dpad_mode(const std::string& str);
 const char* aim_dpad_mode_display_name(AimDpadMode mode);
+const char* resolution_scale_display_name(int scale);
 
 bool load_config(const std::string& config_path = DEFAULT_CONFIG_FILE);
 void save_config(const std::string& config_path = DEFAULT_CONFIG_FILE);

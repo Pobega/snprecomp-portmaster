@@ -579,7 +579,7 @@ std::string get_row_value(MainMenuRow row, const HandheldConfig& cfg) {
         return "Full Expand";
     }
     case MainMenuRow::Resolution:
-        return (cfg.video.resolution_scale >= 2) ? "2x (480p)" : "1x (240p)";
+        return resolution_scale_display_name(cfg.video.resolution_scale);
     case MainMenuRow::VSync:
         return cfg.video.vsync ? "On" : "Off";
     case MainMenuRow::Rumble:
@@ -694,10 +694,13 @@ void cycle_row_value(MainMenuRow row, bool forward) {
             ? ASPECT_RATIO_ORIGINAL : ASPECT_RATIO_EXPAND;
         apply_graphics_config();
         break;
-    case MainMenuRow::Resolution:
-        cfg.video.resolution_scale = (cfg.video.resolution_scale >= 2) ? 1 : 2;
+    case MainMenuRow::Resolution: {
+        constexpr int option_count = MAX_RESOLUTION_SCALE - MIN_RESOLUTION_SCALE + 1;
+        int current = std::clamp(cfg.video.resolution_scale, MIN_RESOLUTION_SCALE, MAX_RESOLUTION_SCALE);
+        cfg.video.resolution_scale = (current + (forward ? 1 : option_count - 1)) % option_count;
         apply_graphics_config();
         break;
+    }
     case MainMenuRow::VSync:
         cfg.video.vsync = !cfg.video.vsync;
         snp::gles3::set_vsync_enabled(cfg.video.vsync);

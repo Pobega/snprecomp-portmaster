@@ -203,6 +203,18 @@ const char* aim_dpad_mode_display_name(AimDpadMode mode) {
     }
 }
 
+const char* resolution_scale_display_name(int scale) {
+    switch (scale) {
+    case 0: return "Native";
+    case 1: return "1x (240p)";
+    case 2: return "2x (480p)";
+    case 3: return "3x (720p)";
+    case 4: return "4x (960p)";
+    case 5: return "5x (1200p)";
+    default: return "Native";
+    }
+}
+
 void apply_graphics_config() {
     snp::gles3::set_vsync_enabled(g_config.video.vsync);
 
@@ -211,9 +223,19 @@ void apply_graphics_config() {
     config.ar_option = (g_config.video.aspect_ratio == ASPECT_RATIO_EXPAND)
         ? ultramodern::renderer::AspectRatio::Expand
         : ultramodern::renderer::AspectRatio::Original;
-    config.res_option = (g_config.video.resolution_scale >= 2)
-        ? ultramodern::renderer::Resolution::Original2x
-        : ultramodern::renderer::Resolution::Original;
+
+    int scale = std::clamp(g_config.video.resolution_scale, MIN_RESOLUTION_SCALE, MAX_RESOLUTION_SCALE);
+    if (scale == RESOLUTION_SCALE_NATIVE) {
+        config.res_option = ultramodern::renderer::Resolution::Auto;
+        config.ds_option = 0;
+    } else if (scale == 1) {
+        config.res_option = ultramodern::renderer::Resolution::Original;
+        config.ds_option = 1;
+    } else {
+        config.res_option = ultramodern::renderer::Resolution::Original2x;
+        config.ds_option = scale;
+    }
+
     config.rr_option = ultramodern::renderer::RefreshRate::Original;
     config.wm_option = ultramodern::renderer::WindowMode::Fullscreen;
     config.hr_option = ultramodern::renderer::HUDRatioMode::Full;
@@ -234,7 +256,7 @@ void save_config(const std::string& config_path) {
         << "[video]\n"
         << "# Aspect ratio: \"expand\" (widescreen full screen) or \"original\" (4:3 pillarboxed)\n"
         << "aspect_ratio = \"" << g_config.video.aspect_ratio << "\"\n"
-        << "# Resolution scale: 2 (native 480p) or 1 (original 240p)\n"
+        << "# Resolution scale: 0 (Native window), 1 (240p), 2 (480p), 3 (720p), 4 (960p), or 5 (1200p)\n"
         << "resolution_scale = " << g_config.video.resolution_scale << "\n"
         << "vsync = " << (g_config.video.vsync ? "true" : "false") << "\n"
         << "target_fps = " << g_config.video.target_fps << "\n"
@@ -310,7 +332,10 @@ bool load_config(const std::string& config_path) {
         if (tbl["video"].is_table()) {
             auto video = tbl["video"];
             g_config.video.aspect_ratio = video["aspect_ratio"].value_or(ASPECT_RATIO_EXPAND);
-            g_config.video.resolution_scale = static_cast<int>(video["resolution_scale"].value_or(int64_t(DEFAULT_RESOLUTION_SCALE)));
+            g_config.video.resolution_scale = std::clamp(
+                static_cast<int>(video["resolution_scale"].value_or(int64_t(DEFAULT_RESOLUTION_SCALE))),
+                MIN_RESOLUTION_SCALE,
+                MAX_RESOLUTION_SCALE);
             g_config.video.vsync = video["vsync"].value_or(true);
             g_config.video.target_fps = static_cast<int>(video["target_fps"].value_or(int64_t(DEFAULT_TARGET_FPS)));
             g_config.video.sharp_textures = video["sharp_textures"].value_or(false);

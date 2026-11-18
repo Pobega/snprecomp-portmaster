@@ -1,5 +1,7 @@
 #include "gles3_renderer_context.h"
 #include "rdram_access.h"
+#include "ultramodern/config.hpp"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -10,9 +12,78 @@
 namespace snp::gles3 {
 
 namespace {
+constexpr int N64_BASE_WIDTH = 320;
+constexpr int N64_BASE_HEIGHT = 240;
+constexpr float FOUR_BY_THREE_ASPECT = 4.0f / 3.0f;
+constexpr int DEFAULT_WINDOW_WIDTH = 720;
+constexpr int DEFAULT_WINDOW_HEIGHT = 480;
+constexpr int FALLBACK_MAX_FBO_DIM = 2048;
+constexpr int MIN_CUSTOM_SCALE = 1;
+constexpr int MAX_CUSTOM_SCALE = 5;
+constexpr int DEFAULT_2X_SCALE = 2;
+
 OverlayRenderCallback s_overlay_render_callback = nullptr;
 OverlayActiveCallback s_overlay_active_callback = nullptr;
 std::atomic<int> s_target_swap_interval{ 1 };
+
+int extract_resolution_scale(const ultramodern::renderer::GraphicsConfig& config) {
+    switch (config.res_option) {
+    case ultramodern::renderer::Resolution::Auto:
+        return 0;
+    case ultramodern::renderer::Resolution::Original:
+        return MIN_CUSTOM_SCALE;
+    case ultramodern::renderer::Resolution::Original2x:
+        return std::clamp(config.ds_option > 0 ? config.ds_option : DEFAULT_2X_SCALE,
+                          MIN_CUSTOM_SCALE, MAX_CUSTOM_SCALE);
+    default:
+        return 0;
+    }
+}
+
+void compute_four_by_three_fit(int win_w, int win_h, int& out_w, int& out_h) {
+    float win_ratio = static_cast<float>(win_w) / static_cast<float>(win_h);
+    if (win_ratio >= FOUR_BY_THREE_ASPECT) {
+        out_h = win_h;
+        out_w = static_cast<int>(std::lround(static_cast<float>(win_h) * FOUR_BY_THREE_ASPECT));
+    } else {
+        out_w = win_w;
+        out_h = static_cast<int>(std::lround(static_cast<float>(win_w) / FOUR_BY_THREE_ASPECT));
+    }
+}
+
+void compute_render_dimensions(int win_w, int win_h, bool expand_aspect, int scale, int max_fbo_dim,
+                               int& out_w, int& out_h) {
+    if (scale <= 0) {
+        if (expand_aspect) {
+            out_w = win_w;
+            out_h = win_h;
+        } else {
+            compute_four_by_three_fit(win_w, win_h, out_w, out_h);
+        }
+    } else if (!expand_aspect) {
+        out_w = N64_BASE_WIDTH * scale;
+        out_h = N64_BASE_HEIGHT * scale;
+    } else {
+        float win_ratio = static_cast<float>(win_w) / static_cast<float>(win_h);
+        if (win_ratio >= FOUR_BY_THREE_ASPECT) {
+            out_h = N64_BASE_HEIGHT * scale;
+            out_w = static_cast<int>(std::lround(static_cast<float>(out_h) * win_ratio));
+        } else {
+            out_w = N64_BASE_WIDTH * scale;
+            out_h = static_cast<int>(std::lround(static_cast<float>(out_w) / win_ratio));
+        }
+    }
+
+    int largest = std::max(out_w, out_h);
+    if (largest > max_fbo_dim && largest > 0) {
+        float clamp_scale = static_cast<float>(max_fbo_dim) / static_cast<float>(largest);
+        out_w = static_cast<int>(std::lround(static_cast<float>(out_w) * clamp_scale));
+        out_h = static_cast<int>(std::lround(static_cast<float>(out_h) * clamp_scale));
+    }
+
+    out_w = std::max(out_w, 1);
+    out_h = std::max(out_h, 1);
+}
 } // namespace
 
 void set_overlay_render_callback(OverlayRenderCallback callback) {
@@ -88,19 +159,22 @@ Gles3RendererContext::Gles3RendererContext(uint8_t* rdram, ultramodern::renderer
                  gl_renderer ? gl_renderer : "Unknown",
                  gl_version ? gl_version : "Unknown");
 
-    SDL_GetWindowSize(window_handle_, &win_w_, &win_h_);
-    if (win_w_ <= 0) win_w_ = 720;
-    if (win_h_ <= 0) win_h_ = 480;
-
-    render_w_ = win_w_;
-    render_h_ = win_h_;
+    GLint max_tex_size = 0;
+    GLint max_rb_size = 0;
+    gl::glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex_size);
+    gl::glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &max_rb_size);
+    if (max_tex_size > 0 && max_rb_size > 0) {
+        max_fbo_dim_ = std::min(max_tex_size, max_rb_size);
+    } else {
+        max_fbo_dim_ = FALLBACK_MAX_FBO_DIM;
+    }
 
     tmem_cache_ = std::make_unique<TmemTextureCache>();
     shader_cache_ = std::make_unique<CombinerShaderCache>();
     fbo_manager_ = std::make_unique<FboManager>();
     rsp_state_ = std::make_unique<RspState>(*tmem_cache_, *shader_cache_, *fbo_manager_);
 
-    rsp_state_->set_window_size(win_w_, win_h_, expand_aspect_);
+    apply_render_config(ultramodern::renderer::get_graphics_config());
 
     setup_result = ultramodern::renderer::SetupResult::Success;
 }
@@ -113,16 +187,45 @@ bool Gles3RendererContext::valid() {
     return gl_ctx_ != nullptr;
 }
 
-bool Gles3RendererContext::update_config(const ultramodern::renderer::GraphicsConfig& old_config,
-                                         const ultramodern::renderer::GraphicsConfig& new_config) {
-    (void)old_config;
-    expand_aspect_ = (new_config.ar_option == ultramodern::renderer::AspectRatio::Expand);
+void Gles3RendererContext::apply_render_config(const ultramodern::renderer::GraphicsConfig& config) {
     SDL_GetWindowSize(window_handle_, &win_w_, &win_h_);
-    render_w_ = win_w_;
-    render_h_ = win_h_;
+    if (win_w_ <= 0) win_w_ = DEFAULT_WINDOW_WIDTH;
+    if (win_h_ <= 0) win_h_ = DEFAULT_WINDOW_HEIGHT;
+
+    bool new_expand = (config.ar_option == ultramodern::renderer::AspectRatio::Expand);
+    int new_scale = extract_resolution_scale(config);
+
+    int new_render_w = win_w_;
+    int new_render_h = win_h_;
+    compute_render_dimensions(win_w_, win_h_, new_expand, new_scale, max_fbo_dim_,
+                              new_render_w, new_render_h);
+
+    bool changed = !has_applied_config_
+        || new_render_w != render_w_
+        || new_render_h != render_h_
+        || new_scale != resolution_scale_
+        || new_expand != expand_aspect_;
+    expand_aspect_ = new_expand;
+    resolution_scale_ = new_scale;
+    render_w_ = new_render_w;
+    render_h_ = new_render_h;
+    has_applied_config_ = true;
+
+    if (changed) {
+        std::fprintf(stderr,
+                     "[GLES3] Internal resolution: %dx%d (window %dx%d, scale=%d, expand=%d)\n",
+                     render_w_, render_h_, win_w_, win_h_, resolution_scale_, expand_aspect_ ? 1 : 0);
+    }
+
     if (rsp_state_) {
         rsp_state_->set_window_size(win_w_, win_h_, expand_aspect_);
     }
+}
+
+bool Gles3RendererContext::update_config(const ultramodern::renderer::GraphicsConfig& old_config,
+                                         const ultramodern::renderer::GraphicsConfig& new_config) {
+    (void)old_config;
+    apply_render_config(new_config);
     return true;
 }
 
@@ -157,7 +260,7 @@ uint32_t Gles3RendererContext::get_display_framerate() const {
 }
 
 float Gles3RendererContext::get_resolution_scale() const {
-    return static_cast<float>(render_h_) / 240.0f;
+    return static_cast<float>(render_h_) / static_cast<float>(N64_BASE_HEIGHT);
 }
 
 void Gles3RendererContext::send_dl(const OSTask* task) {

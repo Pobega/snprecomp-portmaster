@@ -30,6 +30,7 @@ public:
     float get_resolution_scale() const override;
 
 private:
+    void apply_render_config(const ultramodern::renderer::GraphicsConfig& config);
     void execute_display_list(uint32_t start_phys_addr);
     void dump_frame_ppm(uint64_t frame_num);
     void check_perf_telemetry(uint32_t now_ticks);
@@ -43,7 +44,10 @@ private:
     int win_h_ = 480;
     int render_w_ = 720;
     int render_h_ = 480;
+    int max_fbo_dim_ = 2048;
+    int resolution_scale_ = 0;
     bool expand_aspect_ = true;
+    bool has_applied_config_ = false;
 
     uint64_t dl_count_ = 0;
     uint64_t last_dumped_dl_ = 0;
