@@ -19,7 +19,7 @@ void deliver_overlay_listen_button(PhysicalButton btn);
 
 void update_overlay_input(bool up, bool down, bool left, bool right,
                           bool btn_a, bool btn_b, bool btn_x, bool btn_y,
-                          bool btn_start);
+                          bool btn_start, bool btn_l1 = false, bool btn_r1 = false);
 
 void render_overlay(int win_w, int win_h);
 

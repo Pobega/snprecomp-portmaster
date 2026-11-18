@@ -779,7 +779,8 @@ void poll_input() {
             }
         } else {
             update_overlay_input(nav_up, nav_down, nav_left, nav_right,
-                                 nav_a, nav_b, nav_x, nav_y, nav_start);
+                                 nav_a, nav_b, nav_x, nav_y, nav_start,
+                                 nav_l1, nav_r1);
         }
 
         s_roll_state = {};

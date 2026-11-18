@@ -9,6 +9,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <SDL2/SDL.h>
@@ -55,8 +56,10 @@ constexpr float TOAST_CARD_PAD_RIGHT = 12.0f;
 
 enum class MenuPage {
     Main = 0,
-    CustomizeControls,
+    CustomizeControls = 1,
+    Achievements = 2,
 };
+constexpr int MENU_PAGE_COUNT = 3;
 
 enum class MainMenuRow {
     ControlScheme = 0,
@@ -71,12 +74,13 @@ enum class MainMenuRow {
     VSync,
     Rumble,
     MasterVolume,
+    ViewAchievements,
     RetroAchievements,
     SyncAchievements,
     SaveAndResume,
     SaveAndQuit,
 };
-constexpr int MAIN_MENU_ROW_COUNT = 16;
+constexpr int MAIN_MENU_ROW_COUNT = 17;
 
 enum class CustomMenuRow {
     LoadPreset = 0,
@@ -135,15 +139,41 @@ constexpr ColorRgba COLOR_ROW_HIGHLIGHT{0.18f, 0.32f, 0.60f, 0.85f};
 constexpr ColorRgba COLOR_ROW_BORDER{0.35f, 0.65f, 1.0f, 0.90f};
 constexpr ColorRgba COLOR_SEPARATOR{0.20f, 0.30f, 0.45f, 0.70f};
 constexpr ColorRgba COLOR_BOX_BG{0.04f, 0.05f, 0.08f, 0.90f};
+constexpr ColorRgba COLOR_UNLOCKED_GREEN{0.30f, 0.92f, 0.55f, 1.0f};
+constexpr ColorRgba COLOR_LOCKED_BADGE_TINT{0.45f, 0.48f, 0.55f, 0.88f};
+constexpr ColorRgba COLOR_DIMMED_TROPHY_TINT{0.55f, 0.58f, 0.65f, 0.85f};
+constexpr ColorRgba COLOR_PILL_BG{0.08f, 0.11f, 0.18f, 0.95f};
+
+constexpr const char* FALLBACK_TROPHY_TEX_KEY = "__snp_fallback_trophy__";
+constexpr uint32_t ACH_AUTO_REFRESH_INTERVAL_MS = 1000;
+constexpr int ACH_BADGE_TEX_SIZE = 64;
+constexpr float ACH_CARD_HEIGHT = 58.0f;
+constexpr float ACH_CARD_GAP = 6.0f;
+constexpr float ACH_BADGE_DRAW_SIZE = 44.0f;
+constexpr float ACH_SUMMARY_HEIGHT = 28.0f;
+
+struct BadgeDrawCall {
+    GLuint texture = 0;
+    float x0 = 0.0f;
+    float y0 = 0.0f;
+    float x1 = 0.0f;
+    float y1 = 0.0f;
+    ColorRgba tint = COLOR_WHITE;
+};
 
 std::atomic<bool> s_overlay_open{false};
 std::mutex s_overlay_mutex;
 
 MenuPage s_current_page = MenuPage::Main;
 int s_selected_main_row = 0;
+int s_main_scroll_offset = 0;
 int s_selected_custom_row = 0;
 int s_custom_scroll_offset = 0;
 int s_load_preset_idx = 0;
+int s_ach_selected = 0;
+int s_ach_scroll = 0;
+uint32_t s_last_ach_refresh_ms = 0;
+std::vector<RaAchievementEntry> s_cached_achievements;
 
 ListenSlot s_listen_slot = ListenSlot::None;
 CustomMenuRow s_listen_row = CustomMenuRow::Fire;
@@ -231,10 +261,14 @@ GLuint s_vao = 0;
 GLuint s_vbo = 0;
 GLuint s_toast_vao = 0;
 GLuint s_toast_vbo = 0;
+GLuint s_badge_vao = 0;
+GLuint s_badge_vbo = 0;
 GLuint s_font_texture = 0;
 GLuint s_snp_font_texture = 0;
 GLuint s_toast_badge_texture = 0;
 std::vector<uint8_t> s_last_badge_pixels;
+std::unordered_map<std::string, GLuint> s_badge_textures;
+std::vector<BadgeDrawCall> s_badge_draws;
 GLint s_loc_screen_size = -1;
 GLint s_loc_texture = -1;
 
@@ -287,6 +321,180 @@ void add_string(float x, float y, float scale, const std::string& str, const Col
     for (char ch : str) {
         add_char(cur_x, y, scale, ch, c);
         cur_x += step;
+    }
+}
+
+std::string truncate_8x8_text(const std::string& text, float scale, float max_w) {
+    float char_w = FONT_CHAR_WIDTH * scale;
+    if (char_w <= 0.0f || max_w <= 0.0f || text.empty()) {
+        return "";
+    }
+    int max_chars = static_cast<int>(std::floor(max_w / char_w));
+    if (static_cast<int>(text.size()) <= max_chars) {
+        return text;
+    }
+    if (max_chars <= 3) {
+        return text.substr(0, static_cast<size_t>(std::max(0, max_chars)));
+    }
+    std::string trimmed = text.substr(0, static_cast<size_t>(max_chars - 3));
+    while (!trimmed.empty() && trimmed.back() == ' ') {
+        trimmed.pop_back();
+    }
+    return trimmed + "...";
+}
+
+std::vector<std::string> wrap_8x8_lines(const std::string& text, float scale, float max_w, int max_lines) {
+    std::vector<std::string> lines;
+    float char_w = FONT_CHAR_WIDTH * scale;
+    if (char_w <= 0.0f || max_w <= 0.0f || max_lines <= 0 || text.empty()) {
+        return lines;
+    }
+    int max_chars = std::max(1, static_cast<int>(std::floor(max_w / char_w)));
+    size_t pos = 0;
+    while (pos < text.size() && static_cast<int>(lines.size()) < max_lines) {
+        while (pos < text.size() && text[pos] == ' ') {
+            ++pos;
+        }
+        if (pos >= text.size()) {
+            break;
+        }
+        bool is_last_line = (static_cast<int>(lines.size()) == max_lines - 1);
+        if (is_last_line) {
+            lines.push_back(truncate_8x8_text(text.substr(pos), scale, max_w));
+            break;
+        }
+        size_t remaining = text.size() - pos;
+        if (static_cast<int>(remaining) <= max_chars) {
+            lines.push_back(text.substr(pos));
+            break;
+        }
+        size_t split = pos + static_cast<size_t>(max_chars);
+        size_t space = text.rfind(' ', split);
+        if (space != std::string::npos && space > pos) {
+            lines.push_back(text.substr(pos, space - pos));
+            pos = space + 1;
+        } else {
+            lines.push_back(text.substr(pos, static_cast<size_t>(max_chars)));
+            pos += static_cast<size_t>(max_chars);
+        }
+    }
+    return lines;
+}
+
+GLuint get_or_upload_badge_texture(const std::string& key, const std::vector<uint8_t>& rgba, int w, int h) {
+    auto it = s_badge_textures.find(key);
+    if (it != s_badge_textures.end()) {
+        return it->second;
+    }
+    if (rgba.empty() || w <= 0 || h <= 0) {
+        return 0;
+    }
+    GLuint tex = 0;
+    gl::glGenTextures(1, &tex);
+    if (tex == 0) {
+        return 0;
+    }
+    gl::glBindTexture(GL_TEXTURE_2D, tex);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl::glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl::glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    gl::glBindTexture(GL_TEXTURE_2D, 0);
+    s_badge_textures.emplace(key, tex);
+    return tex;
+}
+
+GLuint get_fallback_trophy_texture() {
+    auto it = s_badge_textures.find(FALLBACK_TROPHY_TEX_KEY);
+    if (it != s_badge_textures.end()) {
+        return it->second;
+    }
+    std::vector<uint8_t> trophy = ra_generate_trophy_badge(ACH_BADGE_TEX_SIZE, ACH_BADGE_TEX_SIZE);
+    return get_or_upload_badge_texture(FALLBACK_TROPHY_TEX_KEY, trophy, ACH_BADGE_TEX_SIZE, ACH_BADGE_TEX_SIZE);
+}
+
+std::vector<uint8_t> desaturate_badge_rgba(const std::vector<uint8_t>& src) {
+    constexpr float LUMA_R = 0.299f;
+    constexpr float LUMA_G = 0.587f;
+    constexpr float LUMA_B = 0.114f;
+    constexpr float LOCKED_BRIGHTNESS = 0.55f;
+    std::vector<uint8_t> out(src.size());
+    for (size_t i = 0; i + 3 < src.size(); i += 4) {
+        float luma = (LUMA_R * static_cast<float>(src[i + 0]) +
+                      LUMA_G * static_cast<float>(src[i + 1]) +
+                      LUMA_B * static_cast<float>(src[i + 2])) * LOCKED_BRIGHTNESS;
+        uint8_t gray = static_cast<uint8_t>(std::clamp(luma, 0.0f, 255.0f));
+        out[i + 0] = gray;
+        out[i + 1] = gray;
+        out[i + 2] = gray;
+        out[i + 3] = src[i + 3];
+    }
+    return out;
+}
+
+GLuint get_achievement_badge_texture(const RaAchievementEntry& ach) {
+    if (ach.badge_rgba.empty() || ach.badge_name.empty()) {
+        return 0;
+    }
+    if (ach.unlocked) {
+        return get_or_upload_badge_texture("badge_" + ach.badge_name, ach.badge_rgba,
+                                           ach.badge_w, ach.badge_h);
+    }
+    std::string locked_key = "badge_locked_" + ach.badge_name;
+    auto it = s_badge_textures.find(locked_key);
+    if (it != s_badge_textures.end()) {
+        return it->second;
+    }
+    std::vector<uint8_t> gray = desaturate_badge_rgba(ach.badge_rgba);
+    return get_or_upload_badge_texture(locked_key, gray, ach.badge_w, ach.badge_h);
+}
+
+std::vector<RaAchievementEntry> build_mock_achievements() {
+    std::vector<RaAchievementEntry> list = {
+        {101, "Target Confirmed", "Clear Stage 1-1 without using a continue on Normal difficulty.", "298498", "", 10, true, false, {}, 0, 0},
+        {102, "Crimson Interceptor", "Defeat the carrier fleet while preserving at least 80% shield integrity.", "298499", "", 25, true, true, {}, 0, 0},
+        {103, "Blade Dancer", "Deflect 5 enemy missiles using sword slashes in a single stage run.", "298500", "3/5", 15, false, false, {}, 0, 0},
+        {104, "Orbital Domination", "Complete the Orbital Elevator ascent without taking damage from laser turrets or falling debris.", "298501", "", 20, false, false, {}, 0, 0},
+        {105, "Savior of Earth", "Complete Sin and Punishment from Stage 1-1 through the final confrontation without continues.", "298502", "", 50, true, false, {}, 0, 0},
+    };
+    for (auto& entry : list) {
+        ra_load_cached_badge_rgba(entry.badge_name, entry.badge_rgba, entry.badge_w, entry.badge_h);
+    }
+    return list;
+}
+
+void refresh_cached_achievements() {
+    s_cached_achievements = ra_get_achievements();
+    const char* mock_env = std::getenv("SNP_TEST_MOCK_ACHIEVEMENTS");
+    if (s_cached_achievements.empty() && mock_env != nullptr &&
+        (std::strcmp(mock_env, "1") == 0 || std::strcmp(mock_env, "true") == 0)) {
+        s_cached_achievements = build_mock_achievements();
+    }
+    s_last_ach_refresh_ms = SDL_GetTicks();
+    if (s_cached_achievements.empty()) {
+        s_ach_selected = 0;
+        s_ach_scroll = 0;
+    } else {
+        int count = static_cast<int>(s_cached_achievements.size());
+        s_ach_selected = std::clamp(s_ach_selected, 0, count - 1);
+        s_ach_scroll = std::clamp(s_ach_scroll, 0, count - 1);
+    }
+}
+
+void compute_achievement_summary_counts(uint32_t& out_unlocked, uint32_t& out_total, uint32_t& out_points_unlocked) {
+    uint32_t pts_available = 0;
+    ra_get_game_summary(out_unlocked, out_total, out_points_unlocked, pts_available);
+    if (out_total == 0 && !s_cached_achievements.empty()) {
+        out_unlocked = 0;
+        out_points_unlocked = 0;
+        out_total = static_cast<uint32_t>(s_cached_achievements.size());
+        for (const auto& ach : s_cached_achievements) {
+            if (ach.unlocked) {
+                ++out_unlocked;
+                out_points_unlocked += ach.points;
+            }
+        }
     }
 }
 
@@ -419,6 +627,7 @@ void init_gl_resources() {
 
     init_vertex_array(s_vao, s_vbo);
     init_vertex_array(s_toast_vao, s_toast_vbo);
+    init_vertex_array(s_badge_vao, s_badge_vbo);
 
     // Build 128x64 font texture containing 95 ASCII glyphs plus a solid white pixel at (127, 63)
     std::vector<uint8_t> texels(128 * 64 * 4, 0);
@@ -519,6 +728,7 @@ std::string get_row_label(MainMenuRow row) {
     case MainMenuRow::VSync: return "VSync";
     case MainMenuRow::Rumble: return "Rumble";
     case MainMenuRow::MasterVolume: return "Master Volume";
+    case MainMenuRow::ViewAchievements: return "View Achievements";
     case MainMenuRow::RetroAchievements: return "RetroAchievements";
     case MainMenuRow::SyncAchievements: return "Sync Achievements";
     case MainMenuRow::SaveAndResume: return "[ Save & Resume ]";
@@ -589,6 +799,18 @@ std::string get_row_value(MainMenuRow row, const HandheldConfig& cfg) {
         return std::to_string(cfg.controls.rumble_strength) + "%";
     case MainMenuRow::MasterVolume:
         return std::to_string(cfg.audio.master_volume) + "%";
+    case MainMenuRow::ViewAchievements: {
+        uint32_t unlocked = 0;
+        uint32_t total = 0;
+        uint32_t pts_u = 0;
+        uint32_t pts_a = 0;
+        ra_get_game_summary(unlocked, total, pts_u, pts_a);
+        if (total > 0) {
+            return std::to_string(unlocked) + " / " + std::to_string(total) +
+                   " (" + std::to_string(pts_u) + " pts) >";
+        }
+        return "Open >";
+    }
     case MainMenuRow::RetroAchievements:
         return ra_get_status_text();
     case MainMenuRow::SyncAchievements: {
@@ -719,6 +941,10 @@ void cycle_row_value(MainMenuRow row, bool forward) {
         cfg.audio.master_volume = std::clamp(cfg.audio.master_volume + delta, 0, 100);
         break;
     }
+    case MainMenuRow::ViewAchievements:
+        s_current_page = MenuPage::Achievements;
+        refresh_cached_achievements();
+        break;
     case MainMenuRow::RetroAchievements:
         ra_set_enabled(!ra_is_enabled());
         break;
@@ -789,54 +1015,131 @@ std::string get_custom_row_value(CustomMenuRow row, const HandheldConfig& cfg) {
     }
 }
 
-void build_main_menu_mesh(int win_w, int win_h) {
-    const auto& cfg = get_config();
+struct PanelLayout {
+    float panel_w = 0.0f;
+    float panel_h = 0.0f;
+    float x0 = 0.0f;
+    float y0 = 0.0f;
+    float x1 = 0.0f;
+    float y1 = 0.0f;
+    float content_y0 = 0.0f;
+};
 
+float draw_tab_bar(float panel_x0, float panel_x1, float bar_y0, MenuPage active_page) {
+    constexpr float TAB_BAR_HEIGHT = 20.0f;
+    constexpr float SIDE_HINT_MARGIN = 18.0f;
+    constexpr float TABS_SIDE_INSET = 44.0f;
+    constexpr float TAB_GAP = 6.0f;
+
+    float bar_y1 = bar_y0 + TAB_BAR_HEIGHT;
+    float hint_y = bar_y0 + 6.0f;
+    add_string(panel_x0 + SIDE_HINT_MARGIN, hint_y, 1.0f, "L1", COLOR_MUTED_HINT);
+    add_string(panel_x1 - SIDE_HINT_MARGIN - 2.0f * FONT_CHAR_WIDTH, hint_y, 1.0f, "R1", COLOR_MUTED_HINT);
+
+    constexpr std::array<std::pair<MenuPage, const char*>, MENU_PAGE_COUNT> TABS = {{
+        {MenuPage::Main, "QUICK SETTINGS"},
+        {MenuPage::CustomizeControls, "CONTROLS"},
+        {MenuPage::Achievements, "ACHIEVEMENTS"},
+    }};
+
+    float tabs_x0 = panel_x0 + TABS_SIDE_INSET;
+    float tabs_total_w = (panel_x1 - TABS_SIDE_INSET) - tabs_x0;
+    float tab_w = (tabs_total_w - TAB_GAP * static_cast<float>(MENU_PAGE_COUNT - 1)) /
+                  static_cast<float>(MENU_PAGE_COUNT);
+
+    for (int i = 0; i < MENU_PAGE_COUNT; ++i) {
+        float tx0 = tabs_x0 + static_cast<float>(i) * (tab_w + TAB_GAP);
+        float tx1 = tx0 + tab_w;
+        bool is_active = (TABS[i].first == active_page);
+
+        ColorRgba bg = is_active ? COLOR_ROW_HIGHLIGHT : COLOR_BOX_BG;
+        ColorRgba border = is_active ? COLOR_ROW_BORDER : COLOR_SEPARATOR;
+        ColorRgba fg = is_active ? COLOR_GOLD : COLOR_MUTED_HINT;
+
+        add_solid_rect(tx0, bar_y0, tx1, bar_y1, bg);
+        add_outline_rect(tx0, bar_y0, tx1, bar_y1, 1.0f, border);
+
+        std::string label = TABS[i].second;
+        float text_w = static_cast<float>(label.size()) * FONT_CHAR_WIDTH;
+        float text_x = tx0 + (tab_w - text_w) * 0.5f;
+        add_string(text_x, hint_y, 1.0f, label, fg);
+    }
+
+    float sep_y = bar_y1 + 4.0f;
+    add_solid_rect(panel_x0 + 16.0f, sep_y, panel_x1 - 16.0f, sep_y + 1.0f, COLOR_SEPARATOR);
+    return sep_y + 5.0f;
+}
+
+PanelLayout draw_panel_chrome(int win_w, int win_h, const std::string& title, MenuPage active_page) {
     add_solid_rect(0.0f, 0.0f, static_cast<float>(win_w), static_cast<float>(win_h), COLOR_BACKDROP);
 
-    float panel_w = std::min(648.0f, std::max(580.0f, static_cast<float>(win_w) - 16.0f));
-    float panel_h = std::min(444.0f, std::max(400.0f, static_cast<float>(win_h) - 16.0f));
-    float panel_x0 = (static_cast<float>(win_w) - panel_w) * 0.5f;
-    float panel_y0 = (static_cast<float>(win_h) - panel_h) * 0.5f;
-    float panel_x1 = panel_x0 + panel_w;
-    float panel_y1 = panel_y0 + panel_h;
+    PanelLayout layout;
+    layout.panel_w = std::min(648.0f, std::max(580.0f, static_cast<float>(win_w) - 16.0f));
+    layout.panel_h = std::min(444.0f, std::max(400.0f, static_cast<float>(win_h) - 16.0f));
+    layout.x0 = (static_cast<float>(win_w) - layout.panel_w) * 0.5f;
+    layout.y0 = (static_cast<float>(win_h) - layout.panel_h) * 0.5f;
+    layout.x1 = layout.x0 + layout.panel_w;
+    layout.y1 = layout.y0 + layout.panel_h;
 
-    add_solid_rect(panel_x0, panel_y0, panel_x1, panel_y1, COLOR_PANEL_BG);
-    add_outline_rect(panel_x0 - 2.0f, panel_y0 - 2.0f, panel_x1 + 2.0f, panel_y1 + 2.0f, 2.0f, COLOR_PANEL_BORDER);
+    add_solid_rect(layout.x0, layout.y0, layout.x1, layout.y1, COLOR_PANEL_BG);
+    add_outline_rect(layout.x0 - 2.0f, layout.y0 - 2.0f, layout.x1 + 2.0f, layout.y1 + 2.0f, 2.0f, COLOR_PANEL_BORDER);
 
-    const std::string title = "SIN AND PUNISHMENT - QUICK SETTINGS";
-    float title_scale = 1.4f;
-    float title_w = title.size() * FONT_CHAR_WIDTH * title_scale;
-    float title_x = panel_x0 + (panel_w - title_w) * 0.5f;
-    float title_y = panel_y0 + 10.0f;
-    add_string(title_x, title_y, title_scale, title, COLOR_GOLD);
+    constexpr float TITLE_SCALE = 1.35f;
+    float title_w = static_cast<float>(title.size()) * FONT_CHAR_WIDTH * TITLE_SCALE;
+    float title_x = layout.x0 + (layout.panel_w - title_w) * 0.5f;
+    float title_y = layout.y0 + 8.0f;
+    add_string(title_x, title_y, TITLE_SCALE, title, COLOR_GOLD);
 
-    float sep_y = title_y + 15.0f;
-    add_solid_rect(panel_x0 + 16.0f, sep_y, panel_x1 - 16.0f, sep_y + 1.0f, COLOR_SEPARATOR);
+    layout.content_y0 = draw_tab_bar(layout.x0, layout.x1, title_y + 14.0f, active_page);
+    return layout;
+}
 
-    float row_start_y = sep_y + 6.0f;
-    float row_height = 17.0f;
-    float label_x = panel_x0 + 36.0f;
-    float value_x = panel_x0 + 260.0f;
+void build_main_menu_mesh(int win_w, int win_h) {
+    const auto& cfg = get_config();
+    PanelLayout panel = draw_panel_chrome(win_w, win_h, "SIN AND PUNISHMENT - QUICK SETTINGS", MenuPage::Main);
+
+    constexpr float LEGEND_HEIGHT = 60.0f;
+    constexpr float FOOTER_CLEARANCE = 22.0f;
+    float legend_box_y1 = panel.y1 - FOOTER_CLEARANCE;
+    float legend_box_y0 = legend_box_y1 - LEGEND_HEIGHT;
+
+    float row_start_y = panel.content_y0 + 3.0f;
+    float row_height = 18.0f;
+    float label_x = panel.x0 + 36.0f;
+    float value_x = panel.x0 + 260.0f;
     float text_scale = 1.25f;
 
-    for (int i = 0; i < MAIN_MENU_ROW_COUNT; ++i) {
+    float available_height = (legend_box_y0 - 6.0f) - row_start_y;
+    int max_visible_rows = std::max(5, static_cast<int>(available_height / row_height));
+    int visible_count = std::min(MAIN_MENU_ROW_COUNT, max_visible_rows);
+
+    if (s_selected_main_row < s_main_scroll_offset) {
+        s_main_scroll_offset = s_selected_main_row;
+    } else if (s_selected_main_row >= s_main_scroll_offset + visible_count) {
+        s_main_scroll_offset = s_selected_main_row - visible_count + 1;
+    }
+    s_main_scroll_offset = std::clamp(s_main_scroll_offset, 0, std::max(0, MAIN_MENU_ROW_COUNT - visible_count));
+
+    for (int vi = 0; vi < visible_count; ++vi) {
+        int i = s_main_scroll_offset + vi;
+        if (i >= MAIN_MENU_ROW_COUNT) break;
+
         MainMenuRow row = static_cast<MainMenuRow>(i);
-        float y = row_start_y + i * row_height;
+        float y = row_start_y + vi * row_height;
         bool is_selected = (s_selected_main_row == i);
 
         if (is_selected) {
-            add_solid_rect(panel_x0 + 16.0f, y - 2.0f, panel_x1 - 16.0f, y + 13.0f, COLOR_ROW_HIGHLIGHT);
-            add_outline_rect(panel_x0 + 16.0f, y - 2.0f, panel_x1 - 16.0f, y + 13.0f, 1.0f, COLOR_ROW_BORDER);
-            add_char(panel_x0 + 20.0f, y, text_scale, '>', COLOR_YELLOW);
+            add_solid_rect(panel.x0 + 16.0f, y - 2.0f, panel.x1 - 16.0f, y + 14.0f, COLOR_ROW_HIGHLIGHT);
+            add_outline_rect(panel.x0 + 16.0f, y - 2.0f, panel.x1 - 16.0f, y + 14.0f, 1.0f, COLOR_ROW_BORDER);
+            add_char(panel.x0 + 20.0f, y, text_scale, '>', COLOR_YELLOW);
         }
 
         std::string label = get_row_label(row);
         std::string value = get_row_value(row, cfg);
 
         if (row == MainMenuRow::SaveAndResume || row == MainMenuRow::SaveAndQuit) {
-            float action_w = label.size() * FONT_CHAR_WIDTH * text_scale;
-            float action_x = panel_x0 + (panel_w - action_w) * 0.5f;
+            float action_w = static_cast<float>(label.size()) * FONT_CHAR_WIDTH * text_scale;
+            float action_x = panel.x0 + (panel.panel_w - action_w) * 0.5f;
             ColorRgba action_color = is_selected ? COLOR_WHITE : COLOR_MUTED_LABEL;
             add_string(action_x, y, text_scale, label, action_color);
         } else {
@@ -847,10 +1150,15 @@ void build_main_menu_mesh(int win_w, int win_h) {
         }
     }
 
-    float legend_box_y0 = row_start_y + MAIN_MENU_ROW_COUNT * row_height + 5.0f;
-    float legend_box_y1 = legend_box_y0 + 64.0f;
-    float box_x0 = panel_x0 + 16.0f;
-    float box_x1 = panel_x1 - 16.0f;
+    if (s_main_scroll_offset > 0) {
+        add_char(panel.x1 - 28.0f, row_start_y - 2.0f, 1.0f, '^', COLOR_YELLOW);
+    }
+    if (s_main_scroll_offset + visible_count < MAIN_MENU_ROW_COUNT) {
+        add_char(panel.x1 - 28.0f, row_start_y + (visible_count - 1) * row_height + 2.0f, 1.0f, 'v', COLOR_YELLOW);
+    }
+
+    float box_x0 = panel.x0 + 16.0f;
+    float box_x1 = panel.x1 - 16.0f;
 
     add_solid_rect(box_x0, legend_box_y0, box_x1, legend_box_y1, COLOR_BOX_BG);
     add_outline_rect(box_x0, legend_box_y0, box_x1, legend_box_y1, 1.0f, COLOR_SEPARATOR);
@@ -892,48 +1200,27 @@ void build_main_menu_mesh(int win_w, int win_h) {
     }
 
     add_string(box_x0 + 10.0f, legend_box_y0 + 5.0f, 1.0f, "ACTIVE CONTROLS (" + get_row_value(MainMenuRow::ControlScheme, cfg) + "):", COLOR_GOLD);
-    add_string(box_x0 + 10.0f, legend_box_y0 + 22.0f, 1.1f, legend_l1, COLOR_WHITE);
-    add_string(box_x0 + 10.0f, legend_box_y0 + 40.0f, 1.1f, legend_l2, COLOR_WHITE);
+    add_string(box_x0 + 10.0f, legend_box_y0 + 21.0f, 1.1f, legend_l1, COLOR_WHITE);
+    add_string(box_x0 + 10.0f, legend_box_y0 + 38.0f, 1.1f, legend_l2, COLOR_WHITE);
 
-    const std::string footer = "D-Pad: Select/Change | A: Select | Select or Menu: Save & Close";
-    float footer_w = footer.size() * FONT_CHAR_WIDTH * 1.0f;
-    float footer_x = panel_x0 + (panel_w - footer_w) * 0.5f;
-    float footer_y = panel_y1 - 16.0f;
+    const std::string footer = "D-Pad: Select/Change | A: Select | L1/R1: Tab | Select/Menu: Close";
+    float footer_w = static_cast<float>(footer.size()) * FONT_CHAR_WIDTH;
+    float footer_x = panel.x0 + (panel.panel_w - footer_w) * 0.5f;
+    float footer_y = panel.y1 - 15.0f;
     add_string(footer_x, footer_y, 1.0f, footer, COLOR_MUTED_HINT);
 }
 
 void build_customize_controls_mesh(int win_w, int win_h) {
     const auto& cfg = get_config();
+    PanelLayout panel = draw_panel_chrome(win_w, win_h, "SIN AND PUNISHMENT - CUSTOMIZE CONTROLS", MenuPage::CustomizeControls);
 
-    add_solid_rect(0.0f, 0.0f, static_cast<float>(win_w), static_cast<float>(win_h), COLOR_BACKDROP);
-
-    float panel_w = std::min(648.0f, std::max(580.0f, static_cast<float>(win_w) - 16.0f));
-    float panel_h = std::min(444.0f, std::max(400.0f, static_cast<float>(win_h) - 16.0f));
-    float panel_x0 = (static_cast<float>(win_w) - panel_w) * 0.5f;
-    float panel_y0 = (static_cast<float>(win_h) - panel_h) * 0.5f;
-    float panel_x1 = panel_x0 + panel_w;
-    float panel_y1 = panel_y0 + panel_h;
-
-    add_solid_rect(panel_x0, panel_y0, panel_x1, panel_y1, COLOR_PANEL_BG);
-    add_outline_rect(panel_x0 - 2.0f, panel_y0 - 2.0f, panel_x1 + 2.0f, panel_y1 + 2.0f, 2.0f, COLOR_PANEL_BORDER);
-
-    const std::string title = "SIN AND PUNISHMENT - CUSTOMIZE CONTROLS";
-    float title_scale = 1.4f;
-    float title_w = title.size() * FONT_CHAR_WIDTH * title_scale;
-    float title_x = panel_x0 + (panel_w - title_w) * 0.5f;
-    float title_y = panel_y0 + 10.0f;
-    add_string(title_x, title_y, title_scale, title, COLOR_GOLD);
-
-    float sep_y = title_y + 15.0f;
-    add_solid_rect(panel_x0 + 16.0f, sep_y, panel_x1 - 16.0f, sep_y + 1.0f, COLOR_SEPARATOR);
-
-    float row_start_y = sep_y + 8.0f;
+    float row_start_y = panel.content_y0 + 4.0f;
     float row_height = 20.0f;
-    float label_x = panel_x0 + 36.0f;
-    float value_x = panel_x0 + 260.0f;
+    float label_x = panel.x0 + 36.0f;
+    float value_x = panel.x0 + 260.0f;
     float text_scale = 1.25f;
 
-    float available_height = (panel_y1 - 24.0f) - row_start_y;
+    float available_height = (panel.y1 - 24.0f) - row_start_y;
     int max_visible_rows = std::max(5, static_cast<int>(available_height / row_height));
     int visible_count = std::min(CUSTOM_MENU_ROW_COUNT, max_visible_rows);
 
@@ -953,17 +1240,17 @@ void build_customize_controls_mesh(int win_w, int win_h) {
         bool is_selected = (s_selected_custom_row == i);
 
         if (is_selected) {
-            add_solid_rect(panel_x0 + 16.0f, y - 2.0f, panel_x1 - 16.0f, y + 15.0f, COLOR_ROW_HIGHLIGHT);
-            add_outline_rect(panel_x0 + 16.0f, y - 2.0f, panel_x1 - 16.0f, y + 15.0f, 1.0f, COLOR_ROW_BORDER);
-            add_char(panel_x0 + 20.0f, y, text_scale, '>', COLOR_YELLOW);
+            add_solid_rect(panel.x0 + 16.0f, y - 2.0f, panel.x1 - 16.0f, y + 15.0f, COLOR_ROW_HIGHLIGHT);
+            add_outline_rect(panel.x0 + 16.0f, y - 2.0f, panel.x1 - 16.0f, y + 15.0f, 1.0f, COLOR_ROW_BORDER);
+            add_char(panel.x0 + 20.0f, y, text_scale, '>', COLOR_YELLOW);
         }
 
         std::string label = get_custom_row_label(row);
         std::string value = get_custom_row_value(row, cfg);
 
         if (row == CustomMenuRow::ResetToPreset || row == CustomMenuRow::Back) {
-            float action_w = label.size() * FONT_CHAR_WIDTH * text_scale;
-            float action_x = panel_x0 + (panel_w - action_w) * 0.5f;
+            float action_w = static_cast<float>(label.size()) * FONT_CHAR_WIDTH * text_scale;
+            float action_x = panel.x0 + (panel.panel_w - action_w) * 0.5f;
             ColorRgba action_color = is_selected ? COLOR_WHITE : COLOR_MUTED_LABEL;
             add_string(action_x, y, text_scale, label, action_color);
         } else {
@@ -978,22 +1265,190 @@ void build_customize_controls_mesh(int win_w, int win_h) {
     }
 
     if (s_custom_scroll_offset > 0) {
-        add_char(panel_x1 - 28.0f, row_start_y - 2.0f, 1.0f, '^', COLOR_YELLOW);
+        add_char(panel.x1 - 28.0f, row_start_y - 2.0f, 1.0f, '^', COLOR_YELLOW);
     }
     if (s_custom_scroll_offset + visible_count < CUSTOM_MENU_ROW_COUNT) {
-        add_char(panel_x1 - 28.0f, row_start_y + (visible_count - 1) * row_height + 2.0f, 1.0f, 'v', COLOR_YELLOW);
+        add_char(panel.x1 - 28.0f, row_start_y + (visible_count - 1) * row_height + 2.0f, 1.0f, 'v', COLOR_YELLOW);
     }
 
-    const std::string footer = "A:Bind  L/R:Cycle  X:Alt  Y:Clear  B:Back";
-    float footer_w = footer.size() * FONT_CHAR_WIDTH * 1.0f;
-    float footer_x = panel_x0 + (panel_w - footer_w) * 0.5f;
-    float footer_y = panel_y1 - 16.0f;
+    const std::string footer = "A:Bind  L/R:Cycle  X:Alt  Y:Clear  L1/R1:Tab  B:Back";
+    float footer_w = static_cast<float>(footer.size()) * FONT_CHAR_WIDTH;
+    float footer_x = panel.x0 + (panel.panel_w - footer_w) * 0.5f;
+    float footer_y = panel.y1 - 15.0f;
+    add_string(footer_x, footer_y, 1.0f, footer, COLOR_MUTED_HINT);
+}
+
+int s_ach_visible_count = 5;
+
+void draw_achievement_pill(float right_x, float y, const std::string& text,
+                           const ColorRgba& text_color, const ColorRgba& border_color,
+                           float& out_left_x) {
+    constexpr float PILL_PAD_X = 6.0f;
+    constexpr float PILL_H = 14.0f;
+    float pill_w = static_cast<float>(text.size()) * FONT_CHAR_WIDTH + PILL_PAD_X * 2.0f;
+    float x0 = right_x - pill_w;
+    add_solid_rect(x0, y, right_x, y + PILL_H, COLOR_PILL_BG);
+    add_outline_rect(x0, y, right_x, y + PILL_H, 1.0f, border_color);
+    add_string(x0 + PILL_PAD_X, y + 3.0f, 1.0f, text, text_color);
+    out_left_x = x0;
+}
+
+void build_achievements_mesh(int win_w, int win_h) {
+    PanelLayout panel = draw_panel_chrome(win_w, win_h, "SIN AND PUNISHMENT - RETROACHIEVEMENTS", MenuPage::Achievements);
+
+    float box_x0 = panel.x0 + 16.0f;
+    float box_x1 = panel.x1 - 16.0f;
+
+    float summary_y0 = panel.content_y0 + 2.0f;
+    float summary_y1 = summary_y0 + ACH_SUMMARY_HEIGHT;
+    add_solid_rect(box_x0, summary_y0, box_x1, summary_y1, COLOR_BOX_BG);
+    add_outline_rect(box_x0, summary_y0, box_x1, summary_y1, 1.0f, COLOR_SEPARATOR);
+
+    GLuint trophy_tex = get_fallback_trophy_texture();
+    if (trophy_tex != 0) {
+        constexpr float SUMMARY_ICON_SIZE = 16.0f;
+        float ix0 = box_x0 + 8.0f;
+        float iy0 = summary_y0 + (ACH_SUMMARY_HEIGHT - SUMMARY_ICON_SIZE) * 0.5f;
+        s_badge_draws.push_back({trophy_tex, ix0, iy0, ix0 + SUMMARY_ICON_SIZE, iy0 + SUMMARY_ICON_SIZE, COLOR_WHITE});
+    }
+
+    uint32_t unlocked = 0;
+    uint32_t total = 0;
+    uint32_t pts_unlocked = 0;
+    compute_achievement_summary_counts(unlocked, total, pts_unlocked);
+
+    std::string summary_text = std::to_string(unlocked) + " / " + std::to_string(total) +
+                               " Unlocked - " + std::to_string(pts_unlocked) + " pts (Softcore)";
+    std::string status_text = ra_get_status_text();
+    float status_w = static_cast<float>(status_text.size()) * FONT_CHAR_WIDTH;
+    float status_x = box_x1 - 10.0f - status_w;
+    float summary_x = box_x0 + 30.0f;
+    float max_summary_w = std::max(80.0f, status_x - summary_x - 10.0f);
+    add_string(summary_x, summary_y0 + 10.0f, 1.0f,
+               truncate_8x8_text(summary_text, 1.0f, max_summary_w), COLOR_GOLD);
+    add_string(status_x, summary_y0 + 10.0f, 1.0f, status_text, COLOR_CYAN);
+
+    if (s_cached_achievements.empty()) {
+        constexpr float EMPTY_CARD_H = 84.0f;
+        constexpr float EMPTY_ICON_SIZE = 48.0f;
+        float cy0 = summary_y1 + 12.0f;
+        float cy1 = cy0 + EMPTY_CARD_H;
+        add_solid_rect(box_x0, cy0, box_x1, cy1, COLOR_BOX_BG);
+        add_outline_rect(box_x0, cy0, box_x1, cy1, 1.0f, COLOR_SEPARATOR);
+
+        float ix0 = box_x0 + 16.0f;
+        float iy0 = cy0 + (EMPTY_CARD_H - EMPTY_ICON_SIZE) * 0.5f;
+        if (trophy_tex != 0) {
+            s_badge_draws.push_back({trophy_tex, ix0, iy0, ix0 + EMPTY_ICON_SIZE, iy0 + EMPTY_ICON_SIZE, COLOR_DIMMED_TROPHY_TINT});
+        }
+
+        float tx = ix0 + EMPTY_ICON_SIZE + 16.0f;
+        add_string(tx, cy0 + 22.0f, 1.15f, "No RetroAchievements loaded yet", COLOR_WHITE);
+        std::string sub = "Status: " + status_text + " (Press A to Sync/Refresh)";
+        add_string(tx, cy0 + 46.0f, 1.0f,
+                   truncate_8x8_text(sub, 1.0f, (box_x1 - 12.0f) - tx), COLOR_MUTED_VALUE);
+    } else {
+        float list_y0 = summary_y1 + 8.0f;
+        float list_y1 = panel.y1 - 24.0f;
+        float card_stride = ACH_CARD_HEIGHT + ACH_CARD_GAP;
+        int count = static_cast<int>(s_cached_achievements.size());
+        int visible_count = std::max(1, static_cast<int>((list_y1 - list_y0 + ACH_CARD_GAP) / card_stride));
+        visible_count = std::min(visible_count, count);
+        s_ach_visible_count = visible_count;
+
+        s_ach_selected = std::clamp(s_ach_selected, 0, count - 1);
+        if (s_ach_selected < s_ach_scroll) {
+            s_ach_scroll = s_ach_selected;
+        } else if (s_ach_selected >= s_ach_scroll + visible_count) {
+            s_ach_scroll = s_ach_selected - visible_count + 1;
+        }
+        s_ach_scroll = std::clamp(s_ach_scroll, 0, std::max(0, count - visible_count));
+
+        for (int vi = 0; vi < visible_count; ++vi) {
+            int idx = s_ach_scroll + vi;
+            const RaAchievementEntry& ach = s_cached_achievements[idx];
+            float cy0 = list_y0 + static_cast<float>(vi) * card_stride;
+            float cy1 = cy0 + ACH_CARD_HEIGHT;
+            bool is_selected = (idx == s_ach_selected);
+
+            add_solid_rect(box_x0, cy0, box_x1, cy1, is_selected ? COLOR_ROW_HIGHLIGHT : COLOR_BOX_BG);
+            add_outline_rect(box_x0, cy0, box_x1, cy1, 1.0f, is_selected ? COLOR_ROW_BORDER : COLOR_SEPARATOR);
+            if (is_selected) {
+                add_char(box_x0 + 4.0f, cy0 + (ACH_CARD_HEIGHT - FONT_CHAR_HEIGHT) * 0.5f, 1.15f, '>', COLOR_YELLOW);
+            }
+
+            float bx0 = box_x0 + 16.0f;
+            float by0 = cy0 + (ACH_CARD_HEIGHT - ACH_BADGE_DRAW_SIZE) * 0.5f;
+            float bx1 = bx0 + ACH_BADGE_DRAW_SIZE;
+            float by1 = by0 + ACH_BADGE_DRAW_SIZE;
+            add_outline_rect(bx0 - 1.0f, by0 - 1.0f, bx1 + 1.0f, by1 + 1.0f, 1.0f,
+                             ach.unlocked ? COLOR_GOLD : COLOR_SEPARATOR);
+
+            GLuint badge_tex = get_achievement_badge_texture(ach);
+            ColorRgba badge_tint = COLOR_WHITE;
+            if (badge_tex == 0) {
+                badge_tex = trophy_tex;
+                badge_tint = ach.unlocked ? COLOR_WHITE : COLOR_LOCKED_BADGE_TINT;
+            }
+            if (badge_tex != 0) {
+                s_badge_draws.push_back({badge_tex, bx0, by0, bx1, by1, badge_tint});
+            }
+
+            std::string status_pill = ach.pending_offline_sync
+                ? "PENDING SYNC"
+                : (ach.unlocked ? "UNLOCKED" : "LOCKED");
+            ColorRgba status_color = ach.pending_offline_sync
+                ? COLOR_GOLD
+                : (ach.unlocked ? COLOR_UNLOCKED_GREEN : COLOR_MUTED_HINT);
+            std::string points_pill = std::to_string(ach.points) + " PTS";
+
+            float pill_y = cy0 + 5.0f;
+            float points_left_x = box_x1 - 10.0f;
+            draw_achievement_pill(box_x1 - 10.0f, pill_y, points_pill, COLOR_GOLD, COLOR_SEPARATOR, points_left_x);
+
+            float status_left_x = points_left_x - 6.0f;
+            draw_achievement_pill(points_left_x - 6.0f, pill_y, status_pill, status_color, status_color, status_left_x);
+
+            float tx = bx1 + 10.0f;
+            constexpr float TITLE_SCALE = 1.15f;
+            float title_max_w = std::max(60.0f, status_left_x - tx - 8.0f);
+            add_string(tx, cy0 + 6.0f, TITLE_SCALE,
+                       truncate_8x8_text(ach.title, TITLE_SCALE, title_max_w),
+                       ach.unlocked ? COLOR_WHITE : COLOR_MUTED_LABEL);
+
+            float desc_max_w = (box_x1 - 12.0f) - tx;
+            std::vector<std::string> desc_lines = wrap_8x8_lines(ach.description, 1.0f, desc_max_w, 2);
+            for (size_t li = 0; li < desc_lines.size(); ++li) {
+                add_string(tx, cy0 + 21.0f + static_cast<float>(li) * 10.0f, 1.0f, desc_lines[li], COLOR_MUTED_LABEL);
+            }
+
+            if (!ach.progress_text.empty()) {
+                add_string(tx, cy0 + 44.0f, 1.0f,
+                           truncate_8x8_text("Progress: " + ach.progress_text, 1.0f, desc_max_w),
+                           COLOR_CYAN);
+            }
+        }
+
+        if (s_ach_scroll > 0) {
+            add_char(panel.x1 - 26.0f, list_y0 - 2.0f, 1.0f, '^', COLOR_YELLOW);
+        }
+        if (s_ach_scroll + visible_count < count) {
+            add_char(panel.x1 - 26.0f, list_y1 - 8.0f, 1.0f, 'v', COLOR_YELLOW);
+        }
+    }
+
+    const std::string footer = "U/D:Scroll  L/R:Page  A:Sync/Refresh  L1/R1:Tab  B:Back";
+    float footer_w = static_cast<float>(footer.size()) * FONT_CHAR_WIDTH;
+    float footer_x = panel.x0 + (panel.panel_w - footer_w) * 0.5f;
+    float footer_y = panel.y1 - 15.0f;
     add_string(footer_x, footer_y, 1.0f, footer, COLOR_MUTED_HINT);
 }
 
 void build_overlay_mesh(int win_w, int win_h) {
     if (s_current_page == MenuPage::CustomizeControls) {
         build_customize_controls_mesh(win_w, win_h);
+    } else if (s_current_page == MenuPage::Achievements) {
+        build_achievements_mesh(win_w, win_h);
     } else {
         build_main_menu_mesh(win_w, win_h);
     }
@@ -1002,9 +1457,20 @@ void build_overlay_mesh(int win_w, int win_h) {
 } // namespace
 
 void init_overlay() {
+    std::lock_guard<std::mutex> lock(s_overlay_mutex);
     const char* test_env = std::getenv("SNP_TEST_OPEN_OVERLAY");
     if (test_env != nullptr && (std::strcmp(test_env, "1") == 0 || std::strcmp(test_env, "true") == 0)) {
         s_overlay_open.store(true, std::memory_order_relaxed);
+        const char* page_env = std::getenv("SNP_TEST_OVERLAY_PAGE");
+        if (page_env != nullptr) {
+            if (std::strcmp(page_env, "achievements") == 0) {
+                s_current_page = MenuPage::Achievements;
+                refresh_cached_achievements();
+            } else if (std::strcmp(page_env, "controls") == 0) {
+                s_current_page = MenuPage::CustomizeControls;
+            }
+        }
+        s_mesh_dirty = true;
     }
 }
 
@@ -1012,19 +1478,30 @@ void shutdown_overlay() {
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
     if (s_gl_initialized) {
         if (SDL_GL_GetCurrentContext() != nullptr) {
+            for (const auto& kv : s_badge_textures) {
+                if (kv.second != 0) {
+                    gl::glDeleteTextures(1, &kv.second);
+                }
+            }
             if (s_toast_badge_texture) gl::glDeleteTextures(1, &s_toast_badge_texture);
             if (s_font_texture) gl::glDeleteTextures(1, &s_font_texture);
             if (s_snp_font_texture) gl::glDeleteTextures(1, &s_snp_font_texture);
+            if (s_badge_vbo) gl::glDeleteBuffers(1, &s_badge_vbo);
+            if (s_badge_vao) gl::glDeleteVertexArrays(1, &s_badge_vao);
             if (s_toast_vbo) gl::glDeleteBuffers(1, &s_toast_vbo);
             if (s_toast_vao) gl::glDeleteVertexArrays(1, &s_toast_vao);
             if (s_vbo) gl::glDeleteBuffers(1, &s_vbo);
             if (s_vao) gl::glDeleteVertexArrays(1, &s_vao);
             if (s_program) gl::glDeleteProgram(s_program);
         }
+        s_badge_textures.clear();
+        s_badge_draws.clear();
         s_toast_badge_texture = 0;
         s_last_badge_pixels.clear();
         s_font_texture = 0;
         s_snp_font_texture = 0;
+        s_badge_vbo = 0;
+        s_badge_vao = 0;
         s_toast_vbo = 0;
         s_toast_vao = 0;
         s_vbo = 0;
@@ -1040,10 +1517,12 @@ bool is_overlay_open() {
 
 void open_overlay() {
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
-    s_current_page = MenuPage::Main;
-    s_listen_slot = ListenSlot::None;
-    s_mesh_dirty = true;
-    s_overlay_open.store(true, std::memory_order_relaxed);
+    if (!s_overlay_open.load(std::memory_order_relaxed)) {
+        s_current_page = MenuPage::Main;
+        s_listen_slot = ListenSlot::None;
+        s_mesh_dirty = true;
+        s_overlay_open.store(true, std::memory_order_relaxed);
+    }
 }
 
 void close_overlay() {
@@ -1110,15 +1589,59 @@ void deliver_overlay_listen_button(PhysicalButton btn) {
 
 void update_overlay_input(bool up, bool down, bool left, bool right,
                           bool btn_a, bool btn_b, bool btn_x, bool btn_y,
-                          bool btn_start) {
+                          bool btn_start, bool btn_l1, bool btn_r1) {
     if (!s_overlay_open.load(std::memory_order_relaxed)) {
         return;
     }
 
     std::lock_guard<std::mutex> lock(s_overlay_mutex);
 
-    if (up || down || left || right || btn_a || btn_b || btn_x || btn_y || btn_start) {
+    if (up || down || left || right || btn_a || btn_b || btn_x || btn_y || btn_start || btn_l1 || btn_r1) {
         s_mesh_dirty = true;
+    }
+
+    if ((btn_l1 || btn_r1) && s_listen_slot == ListenSlot::None) {
+        int page_idx = static_cast<int>(s_current_page);
+        page_idx = (page_idx + (btn_r1 ? 1 : MENU_PAGE_COUNT - 1)) % MENU_PAGE_COUNT;
+        s_current_page = static_cast<MenuPage>(page_idx);
+        s_listen_slot = ListenSlot::None;
+        if (s_current_page == MenuPage::Achievements) {
+            refresh_cached_achievements();
+        }
+        return;
+    }
+
+    if (s_current_page == MenuPage::Achievements) {
+        if (!s_cached_achievements.empty()) {
+            int count = static_cast<int>(s_cached_achievements.size());
+            if (up) {
+                s_ach_selected = (s_ach_selected + count - 1) % count;
+            }
+            if (down) {
+                s_ach_selected = (s_ach_selected + 1) % count;
+            }
+            if (left) {
+                s_ach_selected = std::max(0, s_ach_selected - std::max(1, s_ach_visible_count));
+            }
+            if (right) {
+                s_ach_selected = std::min(count - 1, s_ach_selected + std::max(1, s_ach_visible_count));
+            }
+        }
+        if (btn_a) {
+            if (ra_is_enabled() && !ra_is_syncing()) {
+                ra_sync_now();
+            }
+            refresh_cached_achievements();
+        }
+        if (btn_b) {
+            s_current_page = MenuPage::Main;
+            return;
+        }
+        if (btn_start) {
+            save_config();
+            close_overlay_locked();
+        }
+        return;
     }
 
     if (s_current_page == MenuPage::CustomizeControls) {
@@ -1220,6 +1743,12 @@ void update_overlay_input(bool up, bool down, bool left, bool right,
             s_selected_custom_row = 0;
             return;
         }
+    } else if (current == MainMenuRow::ViewAchievements) {
+        if (btn_a || right) {
+            s_current_page = MenuPage::Achievements;
+            refresh_cached_achievements();
+            return;
+        }
     } else {
         if (left) {
             cycle_row_value(current, false);
@@ -1265,6 +1794,14 @@ void render_menu(int win_w, int win_h) {
         s_mesh_dirty = true;
     }
 
+    if (s_current_page == MenuPage::Achievements) {
+        uint32_t now_ms = SDL_GetTicks();
+        if (now_ms - s_last_ach_refresh_ms >= ACH_AUTO_REFRESH_INTERVAL_MS) {
+            refresh_cached_achievements();
+            s_mesh_dirty = true;
+        }
+    }
+
     if (win_w != s_last_win_w || win_h != s_last_win_h) {
         s_mesh_dirty = true;
         s_last_win_w = win_w;
@@ -1273,6 +1810,7 @@ void render_menu(int win_w, int win_h) {
 
     if (s_mesh_dirty) {
         s_vertices.clear();
+        s_badge_draws.clear();
         build_overlay_mesh(win_w, win_h);
         if (!s_vertices.empty()) {
             gl::glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
@@ -1304,6 +1842,28 @@ void render_menu(int win_w, int win_h) {
 
     gl::glBindVertexArray(s_vao);
     gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(s_vertices.size()));
+
+    if (!s_badge_draws.empty() && s_badge_vao != 0 && s_badge_vbo != 0) {
+        gl::glBindVertexArray(s_badge_vao);
+        gl::glBindBuffer(GL_ARRAY_BUFFER, s_badge_vbo);
+        for (const auto& draw : s_badge_draws) {
+            if (draw.texture == 0) {
+                continue;
+            }
+            const ColorRgba& c = draw.tint;
+            const std::array<OverlayVertex, 6> quad = {{
+                {draw.x0, draw.y0, 0.0f, 0.0f, c.r, c.g, c.b, c.a},
+                {draw.x1, draw.y0, 1.0f, 0.0f, c.r, c.g, c.b, c.a},
+                {draw.x1, draw.y1, 1.0f, 1.0f, c.r, c.g, c.b, c.a},
+                {draw.x0, draw.y0, 0.0f, 0.0f, c.r, c.g, c.b, c.a},
+                {draw.x1, draw.y1, 1.0f, 1.0f, c.r, c.g, c.b, c.a},
+                {draw.x0, draw.y1, 0.0f, 1.0f, c.r, c.g, c.b, c.a},
+            }};
+            gl::glBindTexture(GL_TEXTURE_2D, draw.texture);
+            gl::glBufferData(GL_ARRAY_BUFFER, quad.size() * sizeof(OverlayVertex), quad.data(), GL_STREAM_DRAW);
+            gl::glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(quad.size()));
+        }
+    }
 
     // Cleanup state
     gl::glDisable(GL_BLEND);

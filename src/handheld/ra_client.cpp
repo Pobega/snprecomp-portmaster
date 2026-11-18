@@ -18,6 +18,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_set>
 #include <vector>
 
 #include "rc_client.h"
@@ -39,6 +40,8 @@ constexpr uint32_t N64_RDRAM_MAX_SIZE = 8 * 1024 * 1024; // 8 MB
 constexpr const char* RA_USER_AGENT = "SnPRecompiled/0.2.0 (Linux; PortMaster)";
 constexpr const char* RA_BADGE_BASE_URL = "https://media.retroachievements.org/Badge/";
 constexpr float DEFAULT_TOAST_DURATION = 4.5f;
+constexpr uint32_t RA_WARNING_ACHIEVEMENT_MIN_ID = 101000001u;
+constexpr uint32_t RA_UNSUPPORTED_GAME_ID_BASE = 0x70000000u;
 
 enum class RaClientState {
     Disabled,
@@ -64,8 +67,11 @@ uint32_t s_current_game_id = 0;
 std::string s_current_game_hash;
 std::atomic<uint32_t> s_unlocked_achievements{0};
 std::atomic<uint32_t> s_total_achievements{0};
+std::atomic<uint32_t> s_points_unlocked{0};
+std::atomic<uint32_t> s_points_available{0};
 bool s_offline_toast_shown = false;
 
+std::recursive_mutex s_client_mutex;
 rc_client_t* s_client = nullptr;
 uint8_t* s_current_rdram = nullptr;
 
@@ -672,28 +678,34 @@ void load_or_fetch_badge(const std::string& badge_name, const std::string& badge
 
 std::vector<uint8_t> get_cached_badge_or_trophy(const std::string& badge_name) {
     if (!badge_name.empty()) {
-        const std::filesystem::path config_dir = recomp::get_config_path();
-        std::filesystem::path badge_path = config_dir / "ra_badges" / (badge_name + ".png");
-
-        std::error_code ec;
-        if (std::filesystem::exists(badge_path, ec)) {
-            std::ifstream file(badge_path, std::ios::binary | std::ios::ate);
-            if (file.is_open()) {
-                auto file_size = file.tellg();
-                if (file_size > 0) {
-                    std::vector<uint8_t> buffer(static_cast<size_t>(file_size));
-                    file.seekg(0, std::ios::beg);
-                    file.read(reinterpret_cast<char*>(buffer.data()), file_size);
-
-                    DecodedImage img;
-                    if (decode_png(buffer.data(), buffer.size(), img) && img.width == 64 && img.height == 64) {
-                        return img.rgba;
-                    }
-                }
-            }
+        std::vector<uint8_t> rgba;
+        int width = 0;
+        int height = 0;
+        if (ra_load_cached_badge_rgba(badge_name, rgba, width, height) && width == 64 && height == 64) {
+            return rgba;
         }
     }
     return ra_generate_trophy_badge();
+}
+
+void reset_cached_summary() {
+    s_unlocked_achievements.store(0);
+    s_total_achievements.store(0);
+    s_points_unlocked.store(0);
+    s_points_available.store(0);
+}
+
+void update_cached_summary(rc_client_t* client) {
+    if (client == nullptr || s_current_game_id >= RA_UNSUPPORTED_GAME_ID_BASE) {
+        reset_cached_summary();
+        return;
+    }
+    rc_client_user_game_summary_t summary{};
+    rc_client_get_user_game_summary(client, &summary);
+    s_unlocked_achievements.store(summary.num_unlocked_achievements);
+    s_total_achievements.store(summary.num_promoted_achievements);
+    s_points_unlocked.store(summary.points_unlocked);
+    s_points_available.store(summary.points_available);
 }
 
 void on_server_call(const rc_api_request_t* request, rc_client_server_callback_t callback, void* callback_data, rc_client_t* client) {
@@ -735,10 +747,7 @@ void on_game_load_completed(int result, const char* error_message, rc_client_t* 
             s_game_title = (game->title && game->title[0]) ? game->title : "Sin and Punishment";
         }
 
-        rc_client_user_game_summary_t summary{};
-        rc_client_get_user_game_summary(client, &summary);
-        s_unlocked_achievements = summary.num_unlocked_achievements;
-        s_total_achievements = summary.num_promoted_achievements;
+        update_cached_summary(client);
 
         std::string badge_name = (game && game->badge_name) ? game->badge_name : "";
         std::string badge_url = (game && game->badge_url) ? game->badge_url : "";
@@ -755,7 +764,7 @@ void on_game_load_completed(int result, const char* error_message, rc_client_t* 
                     const auto& bucket = ach_list->buckets[b];
                     for (uint32_t a = 0; a < bucket.num_achievements; ++a) {
                         const rc_client_achievement_t* ach = bucket.achievements[a];
-                        if (ach && ach->badge_name[0] != '\0') {
+                        if (ach && ach->id < RA_WARNING_ACHIEVEMENT_MIN_ID && ach->badge_name[0] != '\0') {
                             std::string aname = ach->badge_name;
                             std::string aurl = (ach->badge_url && ach->badge_url[0]) ? ach->badge_url : "";
                             load_or_fetch_badge(aname, aurl);
@@ -776,10 +785,10 @@ void on_game_load_completed(int result, const char* error_message, rc_client_t* 
         std::string user_label = s_display_username.empty() ? "Player" : s_display_username;
         std::string sub_line = (s_is_offline_mode.load() ? "Offline: " : "Logged in: ") + user_label;
         std::string mode_suffix = s_is_offline_mode.load() ? " - Cached" : " - Softcore";
-        std::string detail = std::to_string(s_unlocked_achievements) + "/" +
-                             std::to_string(s_total_achievements) + " Unlocked (" +
-                             std::to_string(summary.points_unlocked) + "/" +
-                             std::to_string(summary.points_available) + " pts)" + mode_suffix;
+        std::string detail = std::to_string(s_unlocked_achievements.load()) + "/" +
+                             std::to_string(s_total_achievements.load()) + " Unlocked (" +
+                             std::to_string(s_points_unlocked.load()) + "/" +
+                             std::to_string(s_points_available.load()) + " pts)" + mode_suffix;
         push_toast(header, sub_line, detail,
                    get_cached_badge_or_trophy(badge_name), 5.0f, 1);
     } else {
@@ -910,7 +919,7 @@ void on_rc_event(const rc_client_event_t* event, rc_client_t* client) {
     switch (event->type) {
     case RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED:
         if (event->achievement) {
-            s_unlocked_achievements++;
+            update_cached_summary(client);
             std::string badge_name = event->achievement->badge_name[0] != '\0' ? event->achievement->badge_name : "";
             std::string badge_url = (event->achievement->badge_url && event->achievement->badge_url[0]) ? event->achievement->badge_url : "";
             if (!badge_name.empty()) {
@@ -985,12 +994,15 @@ void ra_init() {
         return;
     }
 
-    s_client = rc_client_create(on_read_memory, on_server_call);
-    rc_client_set_hardcore_enabled(s_client, 0); // Enforce Softcore mode
-    rc_client_set_allow_background_memory_reads(s_client, 0);
-    rc_client_set_event_handler(s_client, on_rc_event);
+    {
+        std::lock_guard<std::recursive_mutex> lock(s_client_mutex);
+        s_client = rc_client_create(on_read_memory, on_server_call);
+        rc_client_set_hardcore_enabled(s_client, 0); // Enforce Softcore mode
+        rc_client_set_allow_background_memory_reads(s_client, 0);
+        rc_client_set_event_handler(s_client, on_rc_event);
 
-    trigger_login(s_client);
+        trigger_login(s_client);
+    }
 
     if (std::getenv("SNP_RA_DEMO_TOAST") != nullptr) {
         push_toast("ACHIEVEMENT UNLOCKED", "Target Confirmed",
@@ -1008,9 +1020,13 @@ void ra_shutdown() {
         }
     }
 
-    if (s_client) {
-        rc_client_destroy(s_client);
-        s_client = nullptr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(s_client_mutex);
+        if (s_client) {
+            rc_client_destroy(s_client);
+            s_client = nullptr;
+        }
+        reset_cached_summary();
     }
 
     if (s_libcurl_handle) {
@@ -1028,21 +1044,24 @@ void ra_do_frame(uint8_t* rdram) {
         completed.swap(s_completed_responses);
     }
 
-    for (const auto& item : completed) {
-        if (item.callback) {
-            rc_api_server_response_t server_resp{};
-            server_resp.body = item.body.data();
-            server_resp.body_length = item.body.size();
-            server_resp.http_status_code = item.http_status_code;
-            item.callback(&server_resp, item.callback_data);
+    {
+        std::lock_guard<std::recursive_mutex> lock(s_client_mutex);
+        for (const auto& item : completed) {
+            if (item.callback) {
+                rc_api_server_response_t server_resp{};
+                server_resp.body = item.body.data();
+                server_resp.body_length = item.body.size();
+                server_resp.http_status_code = item.http_status_code;
+                item.callback(&server_resp, item.callback_data);
+            }
         }
-    }
 
-    if (s_client) {
-        if (rdram != nullptr) {
-            rc_client_do_frame(s_client);
-        } else {
-            rc_client_idle(s_client);
+        if (s_client) {
+            if (rdram != nullptr) {
+                rc_client_do_frame(s_client);
+            } else {
+                rc_client_idle(s_client);
+            }
         }
     }
 
@@ -1094,7 +1113,9 @@ void ra_set_enabled(bool enabled) {
 
     if (!enabled) {
         s_state.store(RaClientState::Disabled);
+        reset_cached_summary();
     } else {
+        std::lock_guard<std::recursive_mutex> lock(s_client_mutex);
         if (s_client != nullptr) {
             trigger_login(s_client);
         }
@@ -1154,6 +1175,7 @@ void ra_sync_now() {
     }
 
     if (s_state.load() == RaClientState::Offline && !s_is_offline_mode.load()) {
+        std::lock_guard<std::recursive_mutex> lock(s_client_mutex);
         if (s_client != nullptr) {
             trigger_login(s_client);
         }
@@ -1198,6 +1220,123 @@ bool ra_get_current_toast(RaToastItem& out_toast) {
     }
     out_toast = s_toast_queue.front();
     return true;
+}
+
+void ra_get_game_summary(uint32_t& out_unlocked, uint32_t& out_total,
+                         uint32_t& out_points_unlocked, uint32_t& out_points_available) {
+    out_unlocked = s_unlocked_achievements.load();
+    out_total = s_total_achievements.load();
+    out_points_unlocked = s_points_unlocked.load();
+    out_points_available = s_points_available.load();
+}
+
+bool ra_load_cached_badge_rgba(const std::string& badge_name, std::vector<uint8_t>& out_rgba,
+                               int& out_w, int& out_h) {
+    if (badge_name.empty()) {
+        return false;
+    }
+    const std::filesystem::path config_dir = recomp::get_config_path();
+    std::filesystem::path badge_path = config_dir / "ra_badges" / (badge_name + ".png");
+
+    std::error_code ec;
+    if (!std::filesystem::exists(badge_path, ec)) {
+        return false;
+    }
+
+    std::ifstream file(badge_path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    auto file_size = file.tellg();
+    if (file_size <= 0) {
+        return false;
+    }
+
+    std::vector<uint8_t> buffer(static_cast<size_t>(file_size));
+    file.seekg(0, std::ios::beg);
+    file.read(reinterpret_cast<char*>(buffer.data()), file_size);
+
+    DecodedImage img;
+    if (!decode_png(buffer.data(), buffer.size(), img) || img.width == 0 || img.height == 0 || img.rgba.empty()) {
+        return false;
+    }
+
+    out_rgba = std::move(img.rgba);
+    out_w = static_cast<int>(img.width);
+    out_h = static_cast<int>(img.height);
+    return true;
+}
+
+std::vector<RaAchievementEntry> ra_get_achievements() {
+    std::unordered_set<uint32_t> pending_ids;
+    for (const auto& p : load_pending_unlocks()) {
+        if (s_current_game_id == 0 || p.game_id == 0 || p.game_id == s_current_game_id) {
+            pending_ids.insert(p.achievement_id);
+        }
+    }
+
+    struct PendingBadgeMeta {
+        std::string badge_url;
+    };
+    std::vector<RaAchievementEntry> entries;
+    std::vector<PendingBadgeMeta> badge_meta;
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(s_client_mutex);
+        if (s_client == nullptr || !rc_client_has_achievements(s_client)) {
+            return entries;
+        }
+
+        rc_client_achievement_list_t* ach_list = rc_client_create_achievement_list(
+            s_client,
+            RC_CLIENT_ACHIEVEMENT_CATEGORY_PROMOTED_AND_UNPROMOTED,
+            RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_PROGRESS);
+        if (ach_list == nullptr) {
+            return entries;
+        }
+
+        for (uint32_t b = 0; b < ach_list->num_buckets; ++b) {
+            const auto& bucket = ach_list->buckets[b];
+            for (uint32_t a = 0; a < bucket.num_achievements; ++a) {
+                const rc_client_achievement_t* ach = bucket.achievements[a];
+                if (ach == nullptr || ach->id >= RA_WARNING_ACHIEVEMENT_MIN_ID) {
+                    continue;
+                }
+
+                RaAchievementEntry entry;
+                entry.id = ach->id;
+                entry.title = ach->title ? ach->title : "";
+                entry.description = ach->description ? ach->description : "";
+                entry.badge_name = (ach->badge_name[0] != '\0') ? ach->badge_name : "";
+                entry.progress_text = (ach->measured_progress[0] != '\0') ? ach->measured_progress : "";
+                entry.points = ach->points;
+                entry.pending_offline_sync = (pending_ids.count(ach->id) > 0);
+                entry.unlocked = (ach->unlocked != RC_CLIENT_ACHIEVEMENT_UNLOCKED_NONE) ||
+                                 (ach->state == RC_CLIENT_ACHIEVEMENT_STATE_UNLOCKED) ||
+                                 entry.pending_offline_sync;
+
+                std::string badge_url = (ach->badge_url && ach->badge_url[0] != '\0') ? ach->badge_url : "";
+                entries.push_back(std::move(entry));
+                badge_meta.push_back({std::move(badge_url)});
+            }
+        }
+
+        rc_client_destroy_achievement_list(ach_list);
+    }
+
+    const bool offline = s_is_offline_mode.load();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        auto& entry = entries[i];
+        if (entry.badge_name.empty()) {
+            continue;
+        }
+        if (!ra_load_cached_badge_rgba(entry.badge_name, entry.badge_rgba, entry.badge_w, entry.badge_h) && !offline) {
+            load_or_fetch_badge(entry.badge_name, badge_meta[i].badge_url);
+        }
+    }
+
+    return entries;
 }
 
 std::vector<uint8_t> ra_generate_trophy_badge(uint32_t width, uint32_t height) {
