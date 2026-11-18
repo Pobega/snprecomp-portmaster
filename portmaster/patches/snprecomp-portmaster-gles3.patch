@@ -2172,12 +2172,14 @@ index 0000000..e2e5aab
 +} // namespace snp::gles3
 diff --git a/src/gles3/gles3_renderer_context.cpp b/src/gles3/gles3_renderer_context.cpp
 new file mode 100644
-index 0000000..13c4ce4
+index 0000000..a919d95
 --- /dev/null
 +++ b/src/gles3/gles3_renderer_context.cpp
-@@ -0,0 +1,676 @@
+@@ -0,0 +1,779 @@
 +#include "gles3_renderer_context.h"
 +#include "rdram_access.h"
++#include "ultramodern/config.hpp"
++#include <cmath>
 +#include <cstdio>
 +#include <cstdlib>
 +#include <string>
@@ -2188,9 +2190,78 @@ index 0000000..13c4ce4
 +namespace snp::gles3 {
 +
 +namespace {
++constexpr int N64_BASE_WIDTH = 320;
++constexpr int N64_BASE_HEIGHT = 240;
++constexpr float FOUR_BY_THREE_ASPECT = 4.0f / 3.0f;
++constexpr int DEFAULT_WINDOW_WIDTH = 720;
++constexpr int DEFAULT_WINDOW_HEIGHT = 480;
++constexpr int FALLBACK_MAX_FBO_DIM = 2048;
++constexpr int MIN_CUSTOM_SCALE = 1;
++constexpr int MAX_CUSTOM_SCALE = 5;
++constexpr int DEFAULT_2X_SCALE = 2;
++
 +OverlayRenderCallback s_overlay_render_callback = nullptr;
 +OverlayActiveCallback s_overlay_active_callback = nullptr;
 +std::atomic<int> s_target_swap_interval{ 1 };
++
++int extract_resolution_scale(const ultramodern::renderer::GraphicsConfig& config) {
++    switch (config.res_option) {
++    case ultramodern::renderer::Resolution::Auto:
++        return 0;
++    case ultramodern::renderer::Resolution::Original:
++        return MIN_CUSTOM_SCALE;
++    case ultramodern::renderer::Resolution::Original2x:
++        return std::clamp(config.ds_option > 0 ? config.ds_option : DEFAULT_2X_SCALE,
++                          MIN_CUSTOM_SCALE, MAX_CUSTOM_SCALE);
++    default:
++        return 0;
++    }
++}
++
++void compute_four_by_three_fit(int win_w, int win_h, int& out_w, int& out_h) {
++    float win_ratio = static_cast<float>(win_w) / static_cast<float>(win_h);
++    if (win_ratio >= FOUR_BY_THREE_ASPECT) {
++        out_h = win_h;
++        out_w = static_cast<int>(std::lround(static_cast<float>(win_h) * FOUR_BY_THREE_ASPECT));
++    } else {
++        out_w = win_w;
++        out_h = static_cast<int>(std::lround(static_cast<float>(win_w) / FOUR_BY_THREE_ASPECT));
++    }
++}
++
++void compute_render_dimensions(int win_w, int win_h, bool expand_aspect, int scale, int max_fbo_dim,
++                               int& out_w, int& out_h) {
++    if (scale <= 0) {
++        if (expand_aspect) {
++            out_w = win_w;
++            out_h = win_h;
++        } else {
++            compute_four_by_three_fit(win_w, win_h, out_w, out_h);
++        }
++    } else if (!expand_aspect) {
++        out_w = N64_BASE_WIDTH * scale;
++        out_h = N64_BASE_HEIGHT * scale;
++    } else {
++        float win_ratio = static_cast<float>(win_w) / static_cast<float>(win_h);
++        if (win_ratio >= FOUR_BY_THREE_ASPECT) {
++            out_h = N64_BASE_HEIGHT * scale;
++            out_w = static_cast<int>(std::lround(static_cast<float>(out_h) * win_ratio));
++        } else {
++            out_w = N64_BASE_WIDTH * scale;
++            out_h = static_cast<int>(std::lround(static_cast<float>(out_w) / win_ratio));
++        }
++    }
++
++    int largest = std::max(out_w, out_h);
++    if (largest > max_fbo_dim && largest > 0) {
++        float clamp_scale = static_cast<float>(max_fbo_dim) / static_cast<float>(largest);
++        out_w = static_cast<int>(std::lround(static_cast<float>(out_w) * clamp_scale));
++        out_h = static_cast<int>(std::lround(static_cast<float>(out_h) * clamp_scale));
++    }
++
++    out_w = std::max(out_w, 1);
++    out_h = std::max(out_h, 1);
++}
 +} // namespace
 +
 +void set_overlay_render_callback(OverlayRenderCallback callback) {
@@ -2266,19 +2337,22 @@ index 0000000..13c4ce4
 +                 gl_renderer ? gl_renderer : "Unknown",
 +                 gl_version ? gl_version : "Unknown");
 +
-+    SDL_GetWindowSize(window_handle_, &win_w_, &win_h_);
-+    if (win_w_ <= 0) win_w_ = 720;
-+    if (win_h_ <= 0) win_h_ = 480;
-+
-+    render_w_ = win_w_;
-+    render_h_ = win_h_;
++    GLint max_tex_size = 0;
++    GLint max_rb_size = 0;
++    gl::glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex_size);
++    gl::glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &max_rb_size);
++    if (max_tex_size > 0 && max_rb_size > 0) {
++        max_fbo_dim_ = std::min(max_tex_size, max_rb_size);
++    } else {
++        max_fbo_dim_ = FALLBACK_MAX_FBO_DIM;
++    }
 +
 +    tmem_cache_ = std::make_unique<TmemTextureCache>();
 +    shader_cache_ = std::make_unique<CombinerShaderCache>();
 +    fbo_manager_ = std::make_unique<FboManager>();
 +    rsp_state_ = std::make_unique<RspState>(*tmem_cache_, *shader_cache_, *fbo_manager_);
 +
-+    rsp_state_->set_window_size(win_w_, win_h_, expand_aspect_);
++    apply_render_config(ultramodern::renderer::get_graphics_config());
 +
 +    setup_result = ultramodern::renderer::SetupResult::Success;
 +}
@@ -2291,16 +2365,45 @@ index 0000000..13c4ce4
 +    return gl_ctx_ != nullptr;
 +}
 +
-+bool Gles3RendererContext::update_config(const ultramodern::renderer::GraphicsConfig& old_config,
-+                                         const ultramodern::renderer::GraphicsConfig& new_config) {
-+    (void)old_config;
-+    expand_aspect_ = (new_config.ar_option == ultramodern::renderer::AspectRatio::Expand);
++void Gles3RendererContext::apply_render_config(const ultramodern::renderer::GraphicsConfig& config) {
 +    SDL_GetWindowSize(window_handle_, &win_w_, &win_h_);
-+    render_w_ = win_w_;
-+    render_h_ = win_h_;
++    if (win_w_ <= 0) win_w_ = DEFAULT_WINDOW_WIDTH;
++    if (win_h_ <= 0) win_h_ = DEFAULT_WINDOW_HEIGHT;
++
++    bool new_expand = (config.ar_option == ultramodern::renderer::AspectRatio::Expand);
++    int new_scale = extract_resolution_scale(config);
++
++    int new_render_w = win_w_;
++    int new_render_h = win_h_;
++    compute_render_dimensions(win_w_, win_h_, new_expand, new_scale, max_fbo_dim_,
++                              new_render_w, new_render_h);
++
++    bool changed = !has_applied_config_
++        || new_render_w != render_w_
++        || new_render_h != render_h_
++        || new_scale != resolution_scale_
++        || new_expand != expand_aspect_;
++    expand_aspect_ = new_expand;
++    resolution_scale_ = new_scale;
++    render_w_ = new_render_w;
++    render_h_ = new_render_h;
++    has_applied_config_ = true;
++
++    if (changed) {
++        std::fprintf(stderr,
++                     "[GLES3] Internal resolution: %dx%d (window %dx%d, scale=%d, expand=%d)\n",
++                     render_w_, render_h_, win_w_, win_h_, resolution_scale_, expand_aspect_ ? 1 : 0);
++    }
++
 +    if (rsp_state_) {
 +        rsp_state_->set_window_size(win_w_, win_h_, expand_aspect_);
 +    }
++}
++
++bool Gles3RendererContext::update_config(const ultramodern::renderer::GraphicsConfig& old_config,
++                                         const ultramodern::renderer::GraphicsConfig& new_config) {
++    (void)old_config;
++    apply_render_config(new_config);
 +    return true;
 +}
 +
@@ -2335,7 +2438,7 @@ index 0000000..13c4ce4
 +}
 +
 +float Gles3RendererContext::get_resolution_scale() const {
-+    return static_cast<float>(render_h_) / 240.0f;
++    return static_cast<float>(render_h_) / static_cast<float>(N64_BASE_HEIGHT);
 +}
 +
 +void Gles3RendererContext::send_dl(const OSTask* task) {
@@ -2854,10 +2957,10 @@ index 0000000..13c4ce4
 +} // namespace snp::gles3
 diff --git a/src/gles3/gles3_renderer_context.h b/src/gles3/gles3_renderer_context.h
 new file mode 100644
-index 0000000..089343d
+index 0000000..ea0e59d
 --- /dev/null
 +++ b/src/gles3/gles3_renderer_context.h
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,92 @@
 +#pragma once
 +
 +#include <memory>
@@ -2890,6 +2993,7 @@ index 0000000..089343d
 +    float get_resolution_scale() const override;
 +
 +private:
++    void apply_render_config(const ultramodern::renderer::GraphicsConfig& config);
 +    void execute_display_list(uint32_t start_phys_addr);
 +    void dump_frame_ppm(uint64_t frame_num);
 +    void check_perf_telemetry(uint32_t now_ticks);
@@ -2903,7 +3007,10 @@ index 0000000..089343d
 +    int win_h_ = 480;
 +    int render_w_ = 720;
 +    int render_h_ = 480;
++    int max_fbo_dim_ = 2048;
++    int resolution_scale_ = 0;
 +    bool expand_aspect_ = true;
++    bool has_applied_config_ = false;
 +
 +    uint64_t dl_count_ = 0;
 +    uint64_t last_dumped_dl_ = 0;
@@ -5096,10 +5203,10 @@ index 0000000..92e12c3
 +} // namespace snp::gles3
 diff --git a/src/handheld/handheld_config.cpp b/src/handheld/handheld_config.cpp
 new file mode 100644
-index 0000000..d598806
+index 0000000..2e53472
 --- /dev/null
 +++ b/src/handheld/handheld_config.cpp
-@@ -0,0 +1,562 @@
+@@ -0,0 +1,587 @@
 +#include "handheld_config.h"
 +
 +#include <algorithm>
@@ -5305,6 +5412,18 @@ index 0000000..d598806
 +    }
 +}
 +
++const char* resolution_scale_display_name(int scale) {
++    switch (scale) {
++    case 0: return "Native";
++    case 1: return "1x (240p)";
++    case 2: return "2x (480p)";
++    case 3: return "3x (720p)";
++    case 4: return "4x (960p)";
++    case 5: return "5x (1200p)";
++    default: return "Native";
++    }
++}
++
 +void apply_graphics_config() {
 +    snp::gles3::set_vsync_enabled(g_config.video.vsync);
 +
@@ -5313,9 +5432,19 @@ index 0000000..d598806
 +    config.ar_option = (g_config.video.aspect_ratio == ASPECT_RATIO_EXPAND)
 +        ? ultramodern::renderer::AspectRatio::Expand
 +        : ultramodern::renderer::AspectRatio::Original;
-+    config.res_option = (g_config.video.resolution_scale >= 2)
-+        ? ultramodern::renderer::Resolution::Original2x
-+        : ultramodern::renderer::Resolution::Original;
++
++    int scale = std::clamp(g_config.video.resolution_scale, MIN_RESOLUTION_SCALE, MAX_RESOLUTION_SCALE);
++    if (scale == RESOLUTION_SCALE_NATIVE) {
++        config.res_option = ultramodern::renderer::Resolution::Auto;
++        config.ds_option = 0;
++    } else if (scale == 1) {
++        config.res_option = ultramodern::renderer::Resolution::Original;
++        config.ds_option = 1;
++    } else {
++        config.res_option = ultramodern::renderer::Resolution::Original2x;
++        config.ds_option = scale;
++    }
++
 +    config.rr_option = ultramodern::renderer::RefreshRate::Original;
 +    config.wm_option = ultramodern::renderer::WindowMode::Fullscreen;
 +    config.hr_option = ultramodern::renderer::HUDRatioMode::Full;
@@ -5336,7 +5465,7 @@ index 0000000..d598806
 +        << "[video]\n"
 +        << "# Aspect ratio: \"expand\" (widescreen full screen) or \"original\" (4:3 pillarboxed)\n"
 +        << "aspect_ratio = \"" << g_config.video.aspect_ratio << "\"\n"
-+        << "# Resolution scale: 2 (native 480p) or 1 (original 240p)\n"
++        << "# Resolution scale: 0 (Native window), 1 (240p), 2 (480p), 3 (720p), 4 (960p), or 5 (1200p)\n"
 +        << "resolution_scale = " << g_config.video.resolution_scale << "\n"
 +        << "vsync = " << (g_config.video.vsync ? "true" : "false") << "\n"
 +        << "target_fps = " << g_config.video.target_fps << "\n"
@@ -5412,7 +5541,10 @@ index 0000000..d598806
 +        if (tbl["video"].is_table()) {
 +            auto video = tbl["video"];
 +            g_config.video.aspect_ratio = video["aspect_ratio"].value_or(ASPECT_RATIO_EXPAND);
-+            g_config.video.resolution_scale = static_cast<int>(video["resolution_scale"].value_or(int64_t(DEFAULT_RESOLUTION_SCALE)));
++            g_config.video.resolution_scale = std::clamp(
++                static_cast<int>(video["resolution_scale"].value_or(int64_t(DEFAULT_RESOLUTION_SCALE))),
++                MIN_RESOLUTION_SCALE,
++                MAX_RESOLUTION_SCALE);
 +            g_config.video.vsync = video["vsync"].value_or(true);
 +            g_config.video.target_fps = static_cast<int>(video["target_fps"].value_or(int64_t(DEFAULT_TARGET_FPS)));
 +            g_config.video.sharp_textures = video["sharp_textures"].value_or(false);
@@ -5664,10 +5796,10 @@ index 0000000..d598806
 +} // namespace snp::config
 diff --git a/src/handheld/handheld_config.h b/src/handheld/handheld_config.h
 new file mode 100644
-index 0000000..b116786
+index 0000000..f98496d
 --- /dev/null
 +++ b/src/handheld/handheld_config.h
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,179 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -5755,7 +5887,10 @@ index 0000000..b116786
 +constexpr const char* ROM_PREFERRED_EN = "en";
 +constexpr const char* ROM_PREFERRED_JP = "jp";
 +
-+constexpr int DEFAULT_RESOLUTION_SCALE = 2;
++constexpr int RESOLUTION_SCALE_NATIVE = 0;
++constexpr int MIN_RESOLUTION_SCALE = 0;
++constexpr int MAX_RESOLUTION_SCALE = 5;
++constexpr int DEFAULT_RESOLUTION_SCALE = RESOLUTION_SCALE_NATIVE;
 +constexpr int DEFAULT_TARGET_FPS = 60;
 +constexpr int DEFAULT_VOLUME = 100;
 +constexpr int DEFAULT_RUMBLE_STRENGTH = 100;
@@ -5833,6 +5968,7 @@ index 0000000..b116786
 +const char* aim_dpad_mode_to_string(AimDpadMode mode);
 +AimDpadMode string_to_aim_dpad_mode(const std::string& str);
 +const char* aim_dpad_mode_display_name(AimDpadMode mode);
++const char* resolution_scale_display_name(int scale);
 +
 +bool load_config(const std::string& config_path = DEFAULT_CONFIG_FILE);
 +void save_config(const std::string& config_path = DEFAULT_CONFIG_FILE);
@@ -7922,10 +8058,10 @@ index 0000000..05e2614
 +}
 diff --git a/src/handheld/handheld_overlay.cpp b/src/handheld/handheld_overlay.cpp
 new file mode 100644
-index 0000000..bf31b1c
+index 0000000..1c23353
 --- /dev/null
 +++ b/src/handheld/handheld_overlay.cpp
-@@ -0,0 +1,1736 @@
+@@ -0,0 +1,1739 @@
 +#include "handheld_overlay.h"
 +
 +#include <algorithm>
@@ -8507,7 +8643,7 @@ index 0000000..bf31b1c
 +        return "Full Expand";
 +    }
 +    case MainMenuRow::Resolution:
-+        return (cfg.video.resolution_scale >= 2) ? "2x (480p)" : "1x (240p)";
++        return resolution_scale_display_name(cfg.video.resolution_scale);
 +    case MainMenuRow::VSync:
 +        return cfg.video.vsync ? "On" : "Off";
 +    case MainMenuRow::Rumble:
@@ -8622,10 +8758,13 @@ index 0000000..bf31b1c
 +            ? ASPECT_RATIO_ORIGINAL : ASPECT_RATIO_EXPAND;
 +        apply_graphics_config();
 +        break;
-+    case MainMenuRow::Resolution:
-+        cfg.video.resolution_scale = (cfg.video.resolution_scale >= 2) ? 1 : 2;
++    case MainMenuRow::Resolution: {
++        constexpr int option_count = MAX_RESOLUTION_SCALE - MIN_RESOLUTION_SCALE + 1;
++        int current = std::clamp(cfg.video.resolution_scale, MIN_RESOLUTION_SCALE, MAX_RESOLUTION_SCALE);
++        cfg.video.resolution_scale = (current + (forward ? 1 : option_count - 1)) % option_count;
 +        apply_graphics_config();
 +        break;
++    }
 +    case MainMenuRow::VSync:
 +        cfg.video.vsync = !cfg.video.vsync;
 +        snp::gles3::set_vsync_enabled(cfg.video.vsync);
